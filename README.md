@@ -6,6 +6,8 @@ Organizations own named tours. Organization owners have authority across their o
 
 The repository is currently at the product-design stage; application code has not been added yet.
 
+The agreed [backend architecture and stack](docs/backend.md) use TypeScript, Node.js LTS, NestJS, schema-first GraphQL with Apollo Server, Prisma, and PostgreSQL. Hosting is selected as Google Cloud Run for the API and Neon Free for PostgreSQL, with GitHub Actions deploying merges to `main` after checks pass. Vitest is the selected test runner.
+
 ## Development model
 
 AI agents write all application code. An engineer is expected to understand and review every change before it is merged. Agents are held to professional engineering standards, run relevant project checks, and add or update tests when a change calls for them. Task-specific issues can set how much implementation freedom an agent has.

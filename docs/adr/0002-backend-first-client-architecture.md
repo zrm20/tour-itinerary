@@ -1,3 +1,5 @@
 # Build the backend first and serve multiple clients through one API
 
 Use TypeScript for the backend and first web frontend, and build the backend API with its supporting database before starting frontend work; the backend is the core system, while the progressive web app and any future native apps are interface layers over that shared API. Move to the web frontend once the backend reaches an MVP state, with the MVP goals to be defined later. A progressive web app is the first client because it lowers adoption friction and supports fast iteration without App Store publishing requirements. Native apps are the long-term ideal, but their timing, platform strategy, and implementation technology (including whether to use React Native or Swift and Kotlin) remain undecided pending further discovery; React Native would use TypeScript.
+
+Keep the application API client agnostic. If a web client uses cookie sessions, its server framework or a separate thin BFF owns those sessions and browser-specific token handling; the application API does not take on that responsibility.

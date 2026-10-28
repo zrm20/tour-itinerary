@@ -1,0 +1,15 @@
+# Operate authentication in an isolated OIDC module
+
+Initially operate authentication within the NestJS backend using Better Auth with its OAuth Provider plugin, rather than adding a managed identity service dependency during early development or implementing the protocols ourselves. Keep the authentication implementation in a dedicated module, separated from the application's business services, with a standard OIDC boundary to support later replacement by a managed identity provider. This keeps the initial deployment within the modular monolith while accepting responsibility for operating authentication; OIDC compatibility alone does not guarantee seamless credential or session migration.
+
+Choose Better Auth over the protocol-focused `oidc-provider` library to use its built-in email/password authentication and Prisma adapter, reducing the surrounding account-management and persistence integration code. Use the [OAuth Provider plugin](https://better-auth.com/docs/plugins/oauth-provider) with the JWT plugin for OIDC endpoints and asymmetrically signed JWT access tokens. Keep Better Auth-specific types and persistence models inside the identity-provider module; the application API validates access tokens independently of that implementation.
+
+Use redirect-based OIDC sign-in through Authorization Code with PKCE from the start. The authentication module owns the login page, which can be served by the same NestJS deployment; clients integrate through the standard authorization and callback flow rather than a custom GraphQL password-login operation. See [OAuth security best current practice](https://www.rfc-editor.org/rfc/rfc9700.html#section-2.1.1).
+
+The initial authentication scope is limited to early development: user creation and password login. Self-service password changes, password recovery, and advanced abuse controls are deferred so development can focus on the core application. This scope is not approved for public release; revisit the authentication design before making the application public, including whether to continue operating authentication or adopt a managed identity provider.
+
+Development accounts may sign in immediately after creation without email verification, avoiding an email-delivery dependency in this phase. Treat their email addresses as unverified; a matching address alone must not merge accounts or grant access belonging to an existing user.
+
+Deferring features does not relax baseline security: protect endpoints that require authentication, enforce application authorization, store passwords securely, validate tokens correctly, and handle sensitive keys and secrets appropriately from the start.
+
+Use the application's existing PostgreSQL database for authentication persistence, with dedicated tables owned exclusively by the authentication module. Other application modules must not query credential or authentication-session tables directly; they reference the permanent application user ID. This avoids another database service while preserving a module boundary around authentication data.

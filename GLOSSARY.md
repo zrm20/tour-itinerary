@@ -1,5 +1,9 @@
 # Glossary
 
+## User
+
+A person recognized by the application who may own organizations or have access to tours. Their identity in the application remains the same when their sign-in provider changes.
+
 ## Organization
 
 A group that owns tours. An organization can have multiple owners, each with authority over its tours and tour access.

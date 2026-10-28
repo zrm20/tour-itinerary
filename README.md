@@ -6,7 +6,9 @@ Organizations own named tours. Organization owners have authority across their o
 
 The repository is currently at the product-design stage; application code has not been added yet.
 
-The agreed [backend architecture and stack](docs/backend.md) use TypeScript, Node.js LTS, NestJS, schema-first GraphQL with Apollo Server, Prisma, and PostgreSQL. Hosting is selected as Google Cloud Run for the API and Neon Free for PostgreSQL, with GitHub Actions deploying merges to `main` after checks pass. Vitest is the selected test runner.
+The agreed [backend architecture and stack](backend/backend.md) use TypeScript, Node.js LTS, NestJS, schema-first GraphQL with Apollo Server, Prisma, and PostgreSQL. Hosting is selected as Google Cloud Run for the API and Neon Free for PostgreSQL, with GitHub Actions deploying merges to `main` after checks pass. Vitest is the selected test runner.
+
+Initial authentication uses Better Auth with its OAuth Provider and JWT plugins in an isolated identity-provider module. The client-agnostic API uses `@nestjs/authentication` to validate bearer access tokens, with application-owned user IDs and permissions independent of the provider. The initial account flows are for early development only; see [the authentication decision](docs/adr/0008-operate-authentication-in-an-isolated-oidc-module.md).
 
 ## Development model
 

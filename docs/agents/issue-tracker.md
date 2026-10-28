@@ -2,6 +2,14 @@
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
+## Project planning and triage
+
+- GitHub Issues are the source of truth for proposed work, planned work, and roadmap items. Keep repository documentation focused on explaining the project as it exists.
+- Use GitHub Issues without a separate GitHub Projects board or milestones for now.
+- No fixed issue template or required issue format has been agreed. Shape each issue to the work at hand.
+- Start new issues with `needs-triage`. Use `needs-info` while waiting on details, then `ready-for-agent` or `ready-for-human` when the work is ready to proceed. Use `wontfix` for declined work.
+- Engineers review every agent-authored code change before merge. Agents run relevant checks and add or update tests when a change calls for them before requesting review.
+
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.

@@ -2,7 +2,7 @@
 
 The backend uses TypeScript with Node.js on an LTS release. The implemented application is a standalone NestJS health-only HTTP API using the default Express adapter, typed startup configuration, and Vitest integration tests. It starts without a database. See the [backend development instructions](../README.md#backend-development) for the pinned toolchain, configuration, checks, and native watch/build/run commands.
 
-The agreed architecture is a modular monolith with PostgreSQL as its primary database. The decisions below describe that architecture; GraphQL, persistence, and authentication are not implemented in the health-only scaffold. Terraform and keyless Cloud Run delivery are prepared for engineer bootstrap; see the [operations runbook](../docs/operations/cloud-run.md).
+The agreed architecture is a modular monolith with PostgreSQL as its primary database. The decisions below describe that architecture; GraphQL, persistence, and authentication are not implemented in the health-only scaffold. Terraform and keyless Cloud Run delivery are prepared for engineer bootstrap.
 
 Use NestJS with Apollo Server through Nest's official Apollo driver and the default Express HTTP adapter. Nest modules and injectable services organize the application; see [the framework decision](../docs/adr/0006-use-nestjs-with-apollo-server.md).
 

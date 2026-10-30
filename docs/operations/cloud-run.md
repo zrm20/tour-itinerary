@@ -2,17 +2,15 @@
 
 This is preparation for one disposable, shared development environment. An engineer
 reviews and merges the code, owns the Google account/project/billing account, reviews
-private Terraform plans, and performs the applies. No cloud resources have been
-provisioned by this change. There are no availability or production guarantees.
+private Terraform plans, and performs the applies. Provisioning is performed by the engineer using the steps below. There are no
+availability or production guarantees.
 The application remains health-only, with no database, application secrets, or
 runtime Google API privileges. Never expose application data under this public policy.
 
 ## Toolchain and ownership
 
 Use Terraform **1.17.1**, Google provider **8.9.0** (committed lockfile), gcloud
-**591.0.0**, and Node **24.22.2**. The selected Terraform and provider releases were
-checked against their upstream releases; configuration validates against this provider.
-Actions major versions follow the existing repository convention. CI validates
+**591.0.0**, and Node **24.22.2**. Actions major versions follow the existing repository convention. CI validates
 Terraform without credentials and runs the application checks and production-image test.
 
 Terraform owns APIs, Artifact Registry and cleanup, service accounts, IAM, WIF,

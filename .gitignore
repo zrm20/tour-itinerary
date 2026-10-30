@@ -6,3 +6,10 @@
 **/.env
 **/.env.*
 !**/.env.example
+**/.terraform/
+**/*.tfstate*
+**/*.tfplan
+**/backend.hcl
+**/*.tfvars
+!**/*.tfvars.example
+**/gha-creds-*.json

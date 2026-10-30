@@ -57,3 +57,20 @@ jobs:
       - name: Stop test container
         if: always()
         run: docker rm --force api-under-test 2>/dev/null || true
+
+  infrastructure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.1
+      - run: terraform fmt -check -recursive
+        working-directory: infra
+      - run: terraform init -backend=false -lockfile=readonly
+        working-directory: infra
+      - run: terraform validate
+        working-directory: infra
+      - run: terraform test
+        working-directory: infra

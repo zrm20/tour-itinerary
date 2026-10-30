@@ -1,0 +1,122 @@
+name: Development release
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful merged-main CI run ID (artifact must still exist)
+        required: true
+        type: string
+      mode:
+        description: Publish before first Terraform service creation, or release existing service
+        type: choice
+        options: [release, publish-only]
+        default: release
+      fail_check:
+        description: Controlled verification failure for engineer rollout evidence
+        type: choice
+        options: [none, candidate, normal]
+        default: none
+permissions:
+  contents: read
+concurrency:
+  group: development-delivery
+  cancel-in-progress: false
+jobs:
+  deliver:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: development
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CI_RUN_ID: ${{ github.event.workflow_run.id || inputs.ci_run_id }}
+      GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+      CLOUD_RUN_SERVICE: tour-itinerary-api
+      RELEASE_MODE: ${{ inputs.mode || 'release' }}
+      FAIL_CHECK: ${{ inputs.fail_check || 'none' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.2
+      - name: Require checked, current main
+        id: source
+        run: node backend/scripts/release.mjs prepare
+      - uses: actions/checkout@v6
+        if: steps.source.outputs.eligible == 'true'
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+      - name: Download exact tested image
+        if: steps.source.outputs.eligible == 'true'
+        uses: actions/download-artifact@v7
+        with:
+          name: api-image-${{ steps.source.outputs.sha }}
+          run-id: ${{ env.CI_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: tested-image
+      - name: Load and verify production image again before credentials
+        if: steps.source.outputs.eligible == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          docker load --input tested-image/api-image.tar.gz
+          IMAGE="tour-itinerary-api:$SOURCE_SHA"
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")" = "$SOURCE_SHA"
+          docker run --detach --name release-image-test --publish 127.0.0.1:18080:8080 --env PORT=8080 "$IMAGE"
+          node backend/scripts/verify-health.mjs --url http://127.0.0.1:18080/health --commit "$SOURCE_SHA"
+      - name: Authenticate keylessly
+        if: steps.source.outputs.eligible == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DEPLOYMENT_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+        if: steps.source.outputs.eligible == 'true'
+        with:
+          version: '591.0.0'
+      - name: Publish the tested image, never rebuild
+        if: steps.source.outputs.eligible == 'true'
+        id: publish
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          gcloud auth configure-docker us-east4-docker.pkg.dev --quiet
+          IMAGE="us-east4-docker.pkg.dev/$GCP_PROJECT/tour-itinerary/api:$SOURCE_SHA"
+          docker tag "tour-itinerary-api:$SOURCE_SHA" "$IMAGE"
+          docker push "$IMAGE"
+          DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE")"
+          printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+          {
+            printf '## Verified image publication\n\nSource: `%s`\n\nDigest: `%s`\n\n' "$SOURCE_SHA" "$DIGEST"
+            printf 'CI: https://github.com/%s/actions/runs/%s\n\n' "$GITHUB_REPOSITORY" "$CI_RUN_ID"
+            printf 'Release: %s/%s/actions/runs/%s\n\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf 'Mode: %s. Publish-only creates no service and changes no traffic.\n' "$RELEASE_MODE"
+          } >> "$GITHUB_STEP_SUMMARY"
+        # No input is interpolated into executable shell text.
+      - name: Verify candidate, promote, reconcile or restore
+        if: steps.source.outputs.eligible == 'true' && inputs.mode != 'publish-only'
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: node backend/scripts/release.mjs rollout
+      - name: Show image logs on failure
+        if: failure()
+        run: docker logs release-image-test || true
+      - name: Remove image test container
+        if: always()
+        run: docker rm --force release-image-test 2>/dev/null || true

@@ -17,5 +17,13 @@ export default tseslint.config(
   {
     files: ['**/*.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: {
+        AbortSignal: 'readonly',
+        console: 'readonly',
+        fetch: 'readonly',
+        setTimeout: 'readonly',
+      },
+    },
   },
 );

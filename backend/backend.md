@@ -30,7 +30,7 @@ Development accounts may sign in immediately without email verification. Treat e
 
 Host the API on Google Cloud Run with request-based billing and zero minimum instances, and PostgreSQL on Neon's Free plan. This targets inexpensive deployment for a non-revenue hobby project, accepting cold starts and free-plan limits; Google Cloud usage can still incur charges. These are hosting decisions, not an existing deployment. See [the hosting decision](../docs/adr/0007-host-the-api-on-cloud-run-and-postgresql-on-neon.md).
 
-Use GitHub Actions for continuous integration and deployment. Pull requests run linting, type checks, tests, and a build, and agent-authored changes require engineer review before merge. Merges to `main` trigger the deployment workflow, which runs the checks on the merged commit and deploys it to Cloud Run only after they pass. The workflow has not been implemented yet.
+Use GitHub Actions for continuous integration and deployment. Pull requests and merges to `main` run the shared checks and verify the production Linux image by starting it and requesting `/health`; agent-authored changes require engineer review before merge. Successful `main` checks retain the exact tested image as a short-lived workflow artifact for the delivery workflow to publish without rebuilding. Cloud Run publication and rollout are not implemented yet.
 
 Use Vitest with Nest's testing utilities. Emphasize integration tests exercising GraphQL operations, tour-access rules, and Prisma against an isolated PostgreSQL database, with focused unit tests for business logic where useful.
 

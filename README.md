@@ -10,7 +10,7 @@ The agreed [backend architecture and stack](backend/backend.md) use TypeScript, 
 
 Initial authentication uses Better Auth with its OAuth Provider and JWT plugins in an isolated identity-provider module. The client-agnostic API uses `@nestjs/authentication` to validate bearer access tokens, with application-owned user IDs and permissions independent of the provider. The initial account flows are for early development only; see [the authentication decision](docs/adr/0008-operate-authentication-in-an-isolated-oidc-module.md).
 
-The architecture above records the agreed stack. GraphQL, persistence, authentication, hosting, and delivery workflows are not implemented in the health-only application.
+The architecture above records the agreed stack. GraphQL, persistence, authentication, hosting, and deployment are not implemented in the health-only application. GitHub Actions runs the shared checks and verifies the production container image.
 
 ## Backend development
 
@@ -73,6 +73,29 @@ NODE_ENV=production COMMIT_SHA="$(git rev-parse HEAD)" npm run start:prod
 ```
 
 Then request `/health` and compare `commit` with `git rev-parse HEAD`. Builds require no environment file, database, or deployment settings.
+
+### CI and production image
+
+Pull requests and pushes to `main` install with `npm ci` on the exact pinned Node version and run the same `npm run check` used locally. They then build the `backend/Dockerfile` image for Cloud Run's `linux/amd64` architecture, start that image with a supplied `PORT`, and verify its real `/health` response without database or deployment credentials.
+
+Image verification makes at most 15 requests. Each request has a 2-second timeout and failed attempts are separated by 2 seconds, bounding startup verification to about one minute including request and scheduling overhead. It rejects container startup failure, non-200 responses, invalid JSON, a status other than `ok`, or a commit different from the full workflow SHA.
+
+On a successful push to `main`, CI saves the already-tested image as the `api-image-<full SHA>` workflow artifact for seven days. The delivery workflow must download and load that artifact, publish it with the source-SHA tag, and deploy the registry digest; it must not rebuild the image. Publishing and Cloud Run rollout remain owned by the delivery workflow.
+
+To reproduce image verification locally from the repository root:
+
+```sh
+COMMIT_SHA="$(git rev-parse HEAD)"
+docker buildx build --platform linux/amd64 --load \
+  --build-arg "COMMIT_SHA=$COMMIT_SHA" \
+  --tag "tour-itinerary-api:$COMMIT_SHA" backend
+docker run --detach --name tour-itinerary-api-check \
+  --publish 127.0.0.1:18080:8080 --env PORT=8080 \
+  "tour-itinerary-api:$COMMIT_SHA"
+node backend/scripts/verify-health.mjs \
+  --url http://127.0.0.1:18080/health --commit "$COMMIT_SHA"
+docker rm --force tour-itinerary-api-check
+```
 
 ## Development model
 

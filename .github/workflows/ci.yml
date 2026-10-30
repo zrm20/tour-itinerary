@@ -1,0 +1,59 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  check-and-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      IMAGE_NAME: tour-itinerary-api:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.2
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Run shared project checks
+        working-directory: backend
+        run: npm run check
+      - name: Build production image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          file: backend/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE_NAME }}
+          build-args: COMMIT_SHA=${{ github.sha }}
+      - name: Verify image metadata
+        run: test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE_NAME")" = "$GITHUB_SHA"
+      - name: Start production image
+        run: docker run --detach --name api-under-test --publish 127.0.0.1:18080:8080 --env PORT=8080 "$IMAGE_NAME"
+      - name: Verify production image health
+        working-directory: backend
+        run: node scripts/verify-health.mjs --url http://127.0.0.1:18080/health --commit "$GITHUB_SHA"
+      - name: Preserve tested image for delivery
+        if: github.event_name == 'push'
+        run: docker image save "$IMAGE_NAME" | gzip > api-image.tar.gz
+      - name: Upload tested image
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v6
+        with:
+          name: api-image-${{ github.sha }}
+          path: api-image.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs api-under-test || true
+      - name: Stop test container
+        if: always()
+        run: docker rm --force api-under-test 2>/dev/null || true

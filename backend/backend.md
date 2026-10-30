@@ -2,7 +2,7 @@
 
 The backend uses TypeScript with Node.js on an LTS release. The implemented application is a standalone NestJS health-only HTTP API using the default Express adapter, typed startup configuration, and Vitest integration tests. It starts without a database. See the [backend development instructions](../README.md#backend-development) for the pinned toolchain, configuration, checks, and native watch/build/run commands.
 
-The agreed architecture is a modular monolith with PostgreSQL as its primary database. The decisions below describe that architecture; GraphQL, persistence, authentication, and hosting are not implemented in the health-only scaffold.
+The agreed architecture is a modular monolith with PostgreSQL as its primary database. The decisions below describe that architecture; GraphQL, persistence, and authentication are not implemented in the health-only scaffold. Terraform and keyless Cloud Run delivery are prepared for engineer bootstrap.
 
 Use NestJS with Apollo Server through Nest's official Apollo driver and the default Express HTTP adapter. Nest modules and injectable services organize the application; see [the framework decision](../docs/adr/0006-use-nestjs-with-apollo-server.md).
 
@@ -28,9 +28,9 @@ The initial authentication scope covers user creation and email/password login f
 
 Development accounts may sign in immediately without email verification. Treat email addresses as unverified, and never merge accounts or grant an existing user's access solely because an email address matches.
 
-Host the API on Google Cloud Run with request-based billing and zero minimum instances, and PostgreSQL on Neon's Free plan. This targets inexpensive deployment for a non-revenue hobby project, accepting cold starts and free-plan limits; Google Cloud usage can still incur charges. These are hosting decisions, not an existing deployment. See [the hosting decision](../docs/adr/0007-host-the-api-on-cloud-run-and-postgresql-on-neon.md).
+Host the API on Google Cloud Run with request-based billing and zero minimum instances, and PostgreSQL on Neon's Free plan. This targets inexpensive deployment for a non-revenue hobby project, accepting cold starts and free-plan limits; Google Cloud usage can still incur charges. The [Terraform configuration](../infra/) prepares this environment; actual provisioning and live acceptance remain engineer-operated. See [the hosting decision](../docs/adr/0007-host-the-api-on-cloud-run-and-postgresql-on-neon.md).
 
-Use GitHub Actions for continuous integration and deployment. Pull requests and merges to `main` run the shared checks and verify the production Linux image by starting it and requesting `/health`; agent-authored changes require engineer review before merge. Successful `main` checks retain the exact tested image as a short-lived workflow artifact for the delivery workflow to publish without rebuilding. Cloud Run publication and rollout are not implemented yet.
+Use GitHub Actions for continuous integration and deployment. Pull requests and merges to `main` run the shared checks and verify the production Linux image by starting it and requesting `/health`; agent-authored changes require engineer review before merge. Successful `main` checks retain the exact tested image as a short-lived workflow artifact for the delivery workflow to publish without rebuilding. The release workflow publishes that exact tested image, deploys an immutable candidate digest without normal traffic, verifies its commit, promotes and verifies the normal URL, and restores an explicit previous revision on post-promotion failure. Routine releases do not run Terraform.
 
 Use Vitest with Nest's testing utilities. Emphasize integration tests exercising GraphQL operations, tour-access rules, and Prisma against an isolated PostgreSQL database, with focused unit tests for business logic where useful.
 

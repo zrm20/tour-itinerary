@@ -25,3 +25,4 @@ Domain docs use the single-context layout. See `docs/agents/domain.md`.
 - Use `README.md` for the current project overview and, once available, setup and run instructions. Add architecture or feature explanations under `docs/` or next to the related code when useful.
 - Record agreed domain language in `GLOSSARY.md` and consequential decisions in `docs/adr/`.
 - Track proposed work, future ideas, and roadmap items in GitHub Issues rather than repository documentation. See `docs/agents/issue-tracker.md`.
+- Put ticket completion summaries and verification evidence in comments on the originating issue, not in checked-in documentation. Keep operational runbooks focused on reusable instructions.

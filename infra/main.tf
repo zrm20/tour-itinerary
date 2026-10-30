@@ -10,6 +10,7 @@ resource "google_project_service" "api" {
     "artifactregistry.googleapis.com", "run.googleapis.com", "iam.googleapis.com",
     "iamcredentials.googleapis.com", "sts.googleapis.com", "cloudbilling.googleapis.com",
     "billingbudgets.googleapis.com", "cloudresourcemanager.googleapis.com",
+    "serviceusage.googleapis.com", "storage.googleapis.com",
   ])
   service            = each.key
   disable_on_destroy = false
@@ -124,6 +125,7 @@ resource "google_project_iam_custom_role" "delivery_operations" {
   role_id     = "deliveryOperationReader"
   title       = "Delivery operation polling"
   permissions = ["run.operations.get"]
+  depends_on  = [google_project_service.api]
 }
 resource "google_project_iam_member" "delivery_operations" {
   project = var.project_id

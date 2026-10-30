@@ -59,7 +59,8 @@ images in the same project; do not give registry credentials to the application.
    gcloud projects create "$PROJECT_ID" --name='Tour itinerary development'
    gcloud billing projects link "$PROJECT_ID" --billing-account="$BILLING_ACCOUNT"
    gcloud config set project "$PROJECT_ID"
-   gcloud services enable serviceusage.googleapis.com storage.googleapis.com --project="$PROJECT_ID"
+   gcloud services enable serviceusage.googleapis.com storage.googleapis.com \
+     cloudresourcemanager.googleapis.com --project="$PROJECT_ID"
    ```
 
    The engineer's infrastructure identity needs the ability to enable APIs, manage
@@ -133,7 +134,8 @@ rm foundation.tfplan
 terraform output
 ```
 
-This creates APIs, registry, identities/federation, alert budget and IAM; it does not
+This adopts the already-enabled bootstrap APIs and creates/manages the remaining APIs,
+registry, identities/federation, alert budget and IAM; it does not
 create Cloud Run or its service-level deployment grant. No placeholder image is used.
 If policy prevents API or IAM setup, resolve it with the engineer before progressing.
 
@@ -228,15 +230,21 @@ can also incur charges. See [registry pricing](https://cloud.google.com/artifact
 The workflow starts after successful merged-main CI, or a main-only manual dispatch
 of a successful CI run. One concurrency group covers publication, mutation, checks,
 promotion and recovery. `cancel-in-progress: false` finishes the active release;
-GitHub replaces older pending jobs with the newest waiting one. Out-of-order CI
-completions and stale reruns are skipped by querying current main, both before
+GitHub retains waiting jobs with `queue: max` (up to 100), so a late stale rerun
+cannot evict the newest eligible waiting release. Superseded queued work skips
+without mutation; the current checked main is the only waiting commit eligible to
+release. If the queue reaches 100, GitHub rejects additional work; inspect the queue
+and dispatch checked current main after it drains. Out-of-order CI completions and
+stale reruns are skipped by querying current main, both before
 credentials and immediately before service mutation. A newer push arriving during
 an active candidate does not cancel that active release. The next eligible release
 follows it. A rerun already serving the same SHA verifies health and does no mutation
 unless an engineer explicitly selects a controlled failure.
 
 Before candidate creation, capture one 100% serving revision with a valid full source
-label and digest, verify its health and protect its image as `previous`. Mixed or
+label and digest, verify its health and protect its image as `current`, preserving the earlier
+`previous` tag through candidate or normal-health failure. Only after successful
+normal health do protection tags advance to the newly verified current/fallback pair. Mixed or
 unknown traffic/metadata fails closed for manual reconciliation. Pin normal traffic
 to that explicit revision, clear old candidate tags, then deploy an immutable image
 with a unique `r<run-id>-<attempt>` revision suffix and corresponding candidate tag,
@@ -321,7 +329,16 @@ From `infra/`, run `terraform init -backend=false -lockfile=readonly`,
 Every test uses `mock_provider "google"`; no real resource, ADC or state backend is
 used. A synthetic externally released state verifies that plans preserve the deployed
 digest, source/release labels, explicit traffic and candidate tags while correcting
-ordinary timeout and scaling drift. Also run `actionlint` on the workflows.
+ordinary timeout and scaling drift. Also run actionlint on the workflows:
+
+```sh
+actionlint -ignore '^unexpected key "queue" for "concurrency" section[.]'
+```
+
+GitHub's [current concurrency contract](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
+supports `queue: max`; actionlint 1.7.12 has not added that field. Suppress only that
+exact unknown-field diagnostic, retaining every other syntax/expression check.
+The queue retains up to 100 waiting runs so a stale trigger cannot evict newer work.
 No account-backed plans or live deployment are performed by these checks.
 
 ## Live engineer acceptance checklist

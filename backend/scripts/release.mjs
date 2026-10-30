@@ -212,14 +212,14 @@ async function rollout() {
       return;
     }
     await health(report.serviceUrl, oldCommit, 'previous');
-    // Protect fallback before creating any candidate; current remains protected too.
+    // Protect the captured serving image without replacing the prior rollback image.
     await command('gcloud', [
       'artifacts',
       'docker',
       'tags',
       'add',
       oldImage,
-      `us-east4-docker.pkg.dev/${project}/tour-itinerary/api:previous`,
+      `us-east4-docker.pkg.dev/${project}/tour-itinerary/api:current`,
       '--project',
       project,
       '--quiet',
@@ -275,6 +275,17 @@ async function rollout() {
     if (promotionError)
       report.promotionReconciliation = `CLI failed but traffic converged: ${promotionError}`;
     await health(report.serviceUrl, sha, 'normal');
+    await command('gcloud', [
+      'artifacts',
+      'docker',
+      'tags',
+      'add',
+      previous.image,
+      `us-east4-docker.pkg.dev/${project}/tour-itinerary/api:previous`,
+      '--project',
+      project,
+      '--quiet',
+    ]);
     await command('gcloud', [
       'artifacts',
       'docker',

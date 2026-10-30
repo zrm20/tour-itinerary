@@ -160,6 +160,7 @@ it('preserves traffic when candidate health fails', async () => {
   ]);
   expect(result.calls).not.toContain(`--to-revisions ${candidate}=100`);
   expect(result.output).toContain('previous traffic preserved and verified');
+  expect(result.calls).not.toContain('api:previous');
 });
 
 it('reconciles a candidate creation timeout without moving normal traffic', async () => {

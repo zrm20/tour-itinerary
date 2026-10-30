@@ -24,6 +24,7 @@ permissions:
   contents: read
 concurrency:
   group: development-delivery
+  queue: max
   cancel-in-progress: false
 jobs:
   deliver:
@@ -114,6 +115,18 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
           IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
         run: node backend/scripts/release.mjs rollout
+      - name: Report workflow and checked source even on early failure
+        if: always()
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            printf '\n## Delivery job result\n\nStatus: %s\n\nSource: `%s`\n\nDigest: `%s`\n\n' "$JOB_STATUS" "$SOURCE_SHA" "$IMAGE_DIGEST"
+            printf 'Checked CI: https://github.com/%s/actions/runs/%s\n\n' "$GITHUB_REPOSITORY" "$CI_RUN_ID"
+            printf 'Workflow: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Show image logs on failure
         if: failure()
         run: docker logs release-image-test || true

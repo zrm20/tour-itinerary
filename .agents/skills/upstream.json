@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/mattpocock/skills",
+  "commit": "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
+  "skills": [
+    "productivity/grill-me",
+    "productivity/grilling",
+    "engineering/to-spec",
+    "engineering/to-tickets",
+    "engineering/implement",
+    "engineering/tdd",
+    "engineering/code-review",
+    "engineering/codebase-design",
+    "engineering/improve-codebase-architecture",
+    "engineering/domain-modeling",
+    "productivity/wait-what"
+  ]
+}

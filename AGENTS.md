@@ -1,5 +1,7 @@
 ## Agent skills
 
+Repository skills live in `.agents/skills/`. See `.agents/skills/README.md` for the installed workflow and pinned upstream provenance. Read the selected skill’s `SKILL.md` and its referenced supporting files when using it. Follow the project-specific rules below alongside the skills.
+
 ### Issue tracker
 
 Issues for this repo are tracked in GitHub Issues via `gh`. See `docs/agents/issue-tracker.md`.

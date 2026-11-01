@@ -11,10 +11,13 @@ mock_provider "google" {
   }
 }
 variables {
-  project_id      = "test-project"
-  billing_account = "000000-000000-000000"
-  repository_id   = "123456789"
-  owner_id        = "71274676"
+  project_id       = "test-project"
+  billing_account  = "000000-000000-000000"
+  repository_id    = "123456789"
+  owner_id         = "71274676"
+  enable_service   = false
+  bootstrap_image  = null
+  bootstrap_commit = null
 }
 
 run "foundation_before_first_image" {
@@ -60,7 +63,7 @@ run "create_verified_service" {
     condition = (
       google_cloud_run_service.api[0].template[0].spec[0].containers[0].resources[0].limits == tomap({ cpu = "1", memory = "512Mi" }) &&
       google_cloud_run_service.api[0].template[0].metadata[0].annotations["run.googleapis.com/cpu-throttling"] == "true" &&
-      google_cloud_run_service.api[0].metadata[0].annotations["run.googleapis.com/minScale"] == "0" &&
+      google_cloud_run_service.api[0].template[0].metadata[0].annotations["autoscaling.knative.dev/minScale"] == "0" &&
       google_cloud_run_service.api[0].metadata[0].annotations["run.googleapis.com/maxScale"] == "2" &&
       google_cloud_run_service.api[0].template[0].spec[0].containers[0].startup_probe[0].http_get[0].path == "/health"
     )
@@ -97,6 +100,7 @@ run "preserve_release_owned_fields" {
   assert {
     condition = (
       google_cloud_run_service.api[0].template[0].spec[0].timeout_seconds == 30 &&
+      !contains(keys(google_cloud_run_service.api[0].metadata[0].annotations), "run.googleapis.com/minScale") &&
       google_cloud_run_service.api[0].metadata[0].annotations["run.googleapis.com/maxScale"] == "2"
     )
     error_message = "Ordinary timeout/scaling drift must remain managed despite release exclusions."

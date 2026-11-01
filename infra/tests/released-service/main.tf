@@ -9,7 +9,7 @@ resource "google_cloud_run_service" "api" {
     labels = { "source-commit" = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "release-id" = "r123-1" }
     annotations = {
       "run.googleapis.com/ingress"  = "all"
-      "run.googleapis.com/minScale" = "0"
+      "run.googleapis.com/minScale" = "3" # Ordinary drift: plan must clear it.
       "run.googleapis.com/maxScale" = "7" # Ordinary drift: plan must restore 2.
     }
   }

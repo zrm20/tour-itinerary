@@ -8,8 +8,8 @@ resource "google_cloud_run_service" "api" {
   deletion_policy            = "DELETE" # Disposable development environment.
   metadata {
     annotations = {
+      # Cloud Run omits minScale=0 on read; an absent service minimum means zero.
       "run.googleapis.com/ingress"  = "all"
-      "run.googleapis.com/minScale" = "0"
       "run.googleapis.com/maxScale" = "2"
     }
   }
@@ -45,6 +45,11 @@ resource "google_cloud_run_service" "api" {
     }
   }
   lifecycle {
+    # The provider preserves unconfigured annotations, so detect nonzero minima.
+    postcondition {
+      condition     = lookup(self.metadata[0].effective_annotations, "run.googleapis.com/minScale", "0") == "0"
+      error_message = "Service minimum instances must be zero; clear any nonzero run.googleapis.com/minScale annotation."
+    }
     precondition {
       condition     = can(regex("^us-east4-docker[.]pkg[.]dev/${var.project_id}/tour-itinerary/api@sha256:[0-9a-f]{64}$", var.bootstrap_image))
       error_message = "Service creation requires the verified publish-only registry digest."

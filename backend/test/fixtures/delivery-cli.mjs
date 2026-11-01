@@ -53,7 +53,59 @@ if (basename(bin) === 'gh') {
     });
   }
 } else if (args[0] === 'artifacts') {
-  // Registry changes do not affect serving traffic.
+  if (args.slice(1, 4).join(' ') === 'docker tags add') {
+    // Docker's tag command deletes existing tags, which Writer cannot do.
+    const tag = args[5].split(':').at(-1);
+    if (state.registryTags[tag]) {
+      console.error(
+        "PERMISSION_DENIED: Permission 'artifactregistry.tags.delete' denied",
+      );
+      process.exitCode = 1;
+    } else {
+      state.registryTags[tag] = args[4].split('@')[1];
+      save();
+    }
+  } else if (args[1] === 'tags') {
+    const parent = `projects/${flag('--project')}/locations/${flag('--location')}/repositories/${flag('--repository')}/packages/${flag('--package')}`;
+    if (
+      parent !==
+      'projects/test-project/locations/us-east4/repositories/tour-itinerary/packages/api'
+    )
+      throw new Error('Unexpected registry package');
+    if (args[2] === 'list') {
+      if (scenario === 'registry-list-denied') {
+        console.error('PERMISSION_DENIED: artifactregistry.tags.list');
+        process.exitCode = 1;
+      } else {
+        print(
+          Object.entries(state.registryTags)
+            .map(([tag, version]) => ({
+              name: `${parent}/tags/${tag}`,
+              version: `${parent}/versions/${version}`,
+            }))
+            .filter((tag) => `name=${tag.name}` === flag('--filter')),
+        );
+      }
+    } else if (['create', 'update'].includes(args[2])) {
+      const tag = args[3];
+      if (scenario === 'registry-update-denied') {
+        console.error('PERMISSION_DENIED: artifactregistry.tags.update');
+        process.exitCode = 1;
+      } else if ((args[2] === 'update') !== Boolean(state.registryTags[tag])) {
+        console.error(args[2] === 'update' ? 'NOT_FOUND' : 'ALREADY_EXISTS');
+        process.exitCode = 1;
+      } else {
+        state.registryTags[tag] = flag('--version');
+        save();
+        print({
+          name: `${parent}/tags/${tag}`,
+          version: `${parent}/versions/${state.registryTags[tag]}`,
+        });
+      }
+    } else throw new Error('Unexpected registry operation');
+  } else {
+    throw new Error('Unexpected registry command');
+  }
 } else if (args.includes('describe') && args.includes('services')) {
   if (scenario === 'no-service') fail();
   else

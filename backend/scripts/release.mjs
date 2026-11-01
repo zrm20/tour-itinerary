@@ -168,6 +168,59 @@ async function rollout() {
       '--to-revisions',
       `${name}=100`,
     ]);
+  async function protectImage(image, tag) {
+    const imagePrefix = `us-east4-docker.pkg.dev/${project}/tour-itinerary/api@`;
+    const version = image.slice(imagePrefix.length);
+    if (
+      !image.startsWith(imagePrefix) ||
+      !/^sha256:[0-9a-f]{64}$/.test(version)
+    )
+      throw new Error(
+        'Protection tags require an immutable image in this registry',
+      );
+    const parent = `projects/${project}/locations/us-east4/repositories/tour-itinerary/packages/api`;
+    const name = `${parent}/tags/${tag}`;
+    const targetVersion = `${parent}/versions/${version}`;
+    const registry = [
+      '--project',
+      project,
+      '--location',
+      'us-east4',
+      '--repository',
+      'tour-itinerary',
+      '--package',
+      'api',
+      '--quiet',
+      '--format=json',
+    ];
+    const tags = await json('gcloud', [
+      'artifacts',
+      'tags',
+      'list',
+      ...registry,
+      '--filter',
+      `name=${name}`,
+    ]);
+    if (
+      !Array.isArray(tags) ||
+      tags.length > 1 ||
+      (tags.length && tags[0].name !== name)
+    )
+      throw new Error(`Unexpected registry response for ${tag}`);
+    if (tags[0]?.version === targetVersion) return;
+    // Docker's tags add deletes existing tags; Writer supports direct updates.
+    const updated = await json('gcloud', [
+      'artifacts',
+      'tags',
+      tags.length ? 'update' : 'create',
+      tag,
+      '--version',
+      version,
+      ...registry,
+    ]);
+    if (updated.name !== name || updated.version !== targetVersion)
+      throw new Error(`Registry did not confirm ${tag} image protection`);
+  }
   let previous;
   let promotionAttempted = false;
   let mutationAttempted = false;
@@ -213,17 +266,7 @@ async function rollout() {
     }
     await health(report.serviceUrl, oldCommit, 'previous');
     // Protect the captured serving image without replacing the prior rollback image.
-    await command('gcloud', [
-      'artifacts',
-      'docker',
-      'tags',
-      'add',
-      oldImage,
-      `us-east4-docker.pkg.dev/${project}/tour-itinerary/api:current`,
-      '--project',
-      project,
-      '--quiet',
-    ]);
+    await protectImage(oldImage, 'current');
     if (!(await eligible())) {
       report.result = 'skipped superseded release';
       return;
@@ -275,28 +318,8 @@ async function rollout() {
     if (promotionError)
       report.promotionReconciliation = `CLI failed but traffic converged: ${promotionError}`;
     await health(report.serviceUrl, sha, 'normal');
-    await command('gcloud', [
-      'artifacts',
-      'docker',
-      'tags',
-      'add',
-      previous.image,
-      `us-east4-docker.pkg.dev/${project}/tour-itinerary/api:previous`,
-      '--project',
-      project,
-      '--quiet',
-    ]);
-    await command('gcloud', [
-      'artifacts',
-      'docker',
-      'tags',
-      'add',
-      digest,
-      `us-east4-docker.pkg.dev/${project}/tour-itinerary/api:current`,
-      '--project',
-      project,
-      '--quiet',
-    ]);
+    await protectImage(previous.image, 'previous');
+    await protectImage(digest, 'current');
     report.result = 'promoted and verified';
   } catch (error) {
     report.result = 'failed';

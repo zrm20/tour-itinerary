@@ -92,3 +92,20 @@ it('fails after the bounded attempts when the container is unavailable', async (
   expect(result.exitCode).toBe(1);
   expect(result.output).toContain('attempt 1/1 failed');
 });
+
+it('rejects redirects even when their destination returns healthy JSON', async () => {
+  const url = await serve((request, response) => {
+    if (request.url === '/health') {
+      response.writeHead(302, { location: '/other' });
+      response.end();
+    } else {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ status: 'ok', commit: expectedCommit }));
+    }
+  });
+
+  const result = await verify(url);
+
+  expect(result.exitCode).toBe(1);
+  expect(result.output).toContain('expected HTTP 200, received 302');
+});

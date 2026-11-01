@@ -1,0 +1,2 @@
+bucket = "REPLACE_WITH_GLOBALLY_UNIQUE_PRIVATE_STATE_BUCKET"
+prefix = "tour-itinerary/dev"

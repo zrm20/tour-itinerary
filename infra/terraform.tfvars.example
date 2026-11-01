@@ -1,0 +1,9 @@
+project_id      = "engineer-tour-itinerary-dev"
+billing_account = "000000-000000-000000"
+repository_id   = "REPLACE_WITH_NUMERIC_GITHUB_REPOSITORY_ID"
+owner_id        = "71274676"
+enable_service  = false
+# After successful publish-only, add exact values from that workflow summary:
+# enable_service  = true
+# bootstrap_image = "us-east4-docker.pkg.dev/PROJECT/tour-itinerary/api@sha256:..."
+# bootstrap_commit = "40-character-checked-main-sha"

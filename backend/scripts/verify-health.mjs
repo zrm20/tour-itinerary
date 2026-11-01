@@ -39,7 +39,10 @@ function readArguments(argv) {
 }
 
 async function checkHealth({ url, commit, timeoutMs }) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(timeoutMs),
+    redirect: 'manual',
+  });
   if (response.status !== 200) {
     throw new Error(`expected HTTP 200, received ${response.status}`);
   }

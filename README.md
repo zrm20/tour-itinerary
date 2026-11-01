@@ -10,7 +10,7 @@ The agreed [backend architecture and stack](backend/backend.md) use TypeScript, 
 
 Initial authentication uses Better Auth with its OAuth Provider and JWT plugins in an isolated identity-provider module. The client-agnostic API uses `@nestjs/authentication` to validate bearer access tokens, with application-owned user IDs and permissions independent of the provider. The initial account flows are for early development only; see [the authentication decision](docs/adr/0008-operate-authentication-in-an-isolated-oidc-module.md).
 
-The architecture above records the agreed stack. GraphQL, persistence, authentication, hosting, and deployment are not implemented in the health-only application. GitHub Actions runs the shared checks and verifies the production container image.
+The architecture above records the agreed stack. GraphQL, persistence, and authentication are not implemented in the health-only application. GitHub Actions checks and verifies the production image; reviewed Terraform and keyless Cloud Run delivery are prepared for engineer bootstrap. No cloud provisioning or live deployment is implied by these files.
 
 ## Backend development
 
@@ -80,7 +80,7 @@ Pull requests and pushes to `main` install with `npm ci` on the exact pinned Nod
 
 Image verification makes at most 15 requests. Each request has a 2-second timeout and failed attempts are separated by 2 seconds, bounding startup verification to about one minute including request and scheduling overhead. It rejects container startup failure, non-200 responses, invalid JSON, a status other than `ok`, or a commit different from the full workflow SHA.
 
-On a successful push to `main`, CI saves the already-tested image as the `api-image-<full SHA>` workflow artifact for seven days. The delivery workflow must download and load that artifact, publish it with the source-SHA tag, and deploy the registry digest; it must not rebuild the image. Publishing and Cloud Run rollout remain owned by the delivery workflow.
+On a successful push to `main`, CI saves the already-tested image as the `api-image-<full SHA>` workflow artifact for seven days. The delivery workflow downloads and loads that artifact, verifies its real health again, publishes it with the source-SHA tag, and deploys its immutable registry digest without rebuilding. It serializes candidate verification, promotion and automatic traffic recovery using GitHub OIDC, with a publish-only mode for first bootstrap.
 
 To reproduce image verification locally from the repository root:
 

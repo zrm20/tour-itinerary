@@ -4,6 +4,8 @@ These repository-scoped skills are vendored unchanged from Matt Pocock’s skill
 
 Use `grill-me` (which delegates to `grilling`) to explore a design, `to-spec` to capture it, `to-tickets` to prepare approved work, and `implement` to execute a ticket. Implementation uses `tdd` and `code-review`; `codebase-design` supplies the design vocabulary referenced by TDD.
 
+`improve-codebase-architecture` explores architectural improvements interactively, using the installed `codebase-design`, `grilling`, and `domain-modeling` skills. Its HTML report scaffold and domain-modeling templates are included.
+
 The project-specific issue tracker, labels, and domain rules remain in `docs/agents/`. Planning skills are interactive. Repository skills do not configure a scheduler or automatically start an implementation task. Human review is required before merge.
 
 For updates, fetch the desired upstream revision, review its changes and skill dependencies, replace the listed directories together with their supporting files, and update the provenance and license in the same reviewed change. Do not automatically track the upstream default branch.

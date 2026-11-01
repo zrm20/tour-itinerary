@@ -9,6 +9,8 @@
     "engineering/implement",
     "engineering/tdd",
     "engineering/code-review",
-    "engineering/codebase-design"
+    "engineering/codebase-design",
+    "engineering/improve-codebase-architecture",
+    "engineering/domain-modeling"
   ]
 }

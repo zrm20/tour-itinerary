@@ -19,6 +19,7 @@ const digest = `us-east4-docker.pkg.dev/test-project/tour-itinerary/api@sha256:$
 type State = {
   url: string;
   traffic: { revisionName: string; percent: number }[];
+  registryTags: Record<string, string>;
 };
 
 async function simulate(
@@ -53,6 +54,13 @@ async function simulate(
       JSON.stringify({
         url: `http://127.0.0.1:${address.port}`,
         traffic: [{ revisionName: previous, percent: 100 }],
+        registryTags:
+          scenario === 'missing-registry-tags'
+            ? {}
+            : {
+                current: `sha256:${'1'.repeat(64)}`,
+                previous: `sha256:${'0'.repeat(64)}`,
+              },
       }),
     );
     for (const name of ['gh', 'gcloud']) {
@@ -119,6 +127,54 @@ it('promotes an explicitly verified immutable candidate without rebuilding', asy
   expect(result.calls).not.toContain('build');
 });
 
+it('maintains rollback image protection without tag-delete permission', async () => {
+  const result = await simulate();
+  expect(result.exitCode, result.output).toBe(0);
+  expect(result.calls).not.toContain('artifacts docker tags add');
+  expect(result.state.registryTags).toEqual({
+    current: `sha256:${'2'.repeat(64)}`,
+    previous: `sha256:${'1'.repeat(64)}`,
+  });
+  // The serving image was already protected before candidate creation.
+  expect(result.calls.match(/artifacts tags update current/g)).toHaveLength(1);
+  expect(result.output).toContain('promoted and verified');
+});
+
+it('creates missing protection tags and updates the existing current tag after promotion', async () => {
+  const result = await simulate('missing-registry-tags');
+  expect(result.exitCode, result.output).toBe(0);
+  expect(result.calls).toContain('artifacts tags create current');
+  expect(result.calls).toContain('artifacts tags create previous');
+  expect(result.calls).toContain('artifacts tags update current');
+  expect(result.state.registryTags).toEqual({
+    current: `sha256:${'2'.repeat(64)}`,
+    previous: `sha256:${'1'.repeat(64)}`,
+  });
+});
+
+it('fails before service mutation if registry tag lookup is denied', async () => {
+  const result = await simulate('registry-list-denied');
+  expect(result.exitCode).toBe(1);
+  expect(result.output).toContain('artifactregistry.tags.list');
+  expect(result.calls).not.toContain('artifacts tags create');
+  expect(result.calls).not.toContain('run deploy');
+  expect(result.calls).not.toContain('update-traffic');
+});
+
+it('restores previous traffic if advancing a protection tag is denied', async () => {
+  const result = await simulate('registry-update-denied');
+  expect(result.exitCode).toBe(1);
+  expect(result.output).toContain('artifactregistry.tags.update');
+  expect(result.output).toContain('previous revision restored and verified');
+  expect(result.state.traffic).toEqual([
+    { revisionName: previous, percent: 100 },
+  ]);
+  expect(result.state.registryTags).toEqual({
+    current: `sha256:${'1'.repeat(64)}`,
+    previous: `sha256:${'0'.repeat(64)}`,
+  });
+});
+
 it.each(['pr', 'fork', 'other-workflow', 'failed-ci'])(
   'rejects untrusted or unchecked CI source: %s',
   async (scenario) => {
@@ -160,7 +216,7 @@ it('preserves traffic when candidate health fails', async () => {
   ]);
   expect(result.calls).not.toContain(`--to-revisions ${candidate}=100`);
   expect(result.output).toContain('previous traffic preserved and verified');
-  expect(result.calls).not.toContain('api:previous');
+  expect(result.state.registryTags.previous).toBe(`sha256:${'0'.repeat(64)}`);
 });
 
 it('reconciles a candidate creation timeout without moving normal traffic', async () => {
@@ -189,6 +245,10 @@ it('restores and verifies the explicit previous commit after normal URL failure'
   ]);
   expect(result.output).toContain('previous revision restored and verified');
   expect(result.output).toContain('"rollback": "passed"');
+  expect(result.state.registryTags).toEqual({
+    current: `sha256:${'1'.repeat(64)}`,
+    previous: `sha256:${'0'.repeat(64)}`,
+  });
 });
 
 it('reconciles an ambiguous rollback CLI failure against actual traffic', async () => {

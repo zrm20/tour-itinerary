@@ -10,7 +10,7 @@ The agreed [backend architecture and stack](backend/backend.md) use TypeScript, 
 
 Initial authentication uses Better Auth with its OAuth Provider and JWT plugins in an isolated identity-provider module. The client-agnostic API uses `@nestjs/authentication` to validate bearer access tokens, with application-owned user IDs and permissions independent of the provider. The initial account flows are for early development only; see [the authentication decision](docs/adr/0008-operate-authentication-in-an-isolated-oidc-module.md).
 
-The architecture above records the agreed stack. GraphQL, persistence, and authentication are not implemented in the health-only application. GitHub Actions checks and verifies the production image; reviewed Terraform and keyless Cloud Run delivery are prepared for engineer bootstrap. No cloud provisioning or live deployment is implied by these files.
+The architecture above records the agreed stack. GraphQL, persistence, and authentication are not implemented in the health-only application. GitHub Actions verifies and releases the health-only production image to the shared development Cloud Run service. See the [Google Cloud operating guide](docs/operations/google-cloud.md) for bootstrap, billing controls, deployment inspection, retention, and recovery. Account-specific deployment evidence is recorded in GitHub Issues.
 
 ## Backend development
 

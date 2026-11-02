@@ -1,0 +1,15 @@
+generator client {
+  provider = "prisma-client"
+  output = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model InfrastructureFixture {
+  key String @id
+  message String
+  @@map("infrastructure_fixture")
+}

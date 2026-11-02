@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    environment:
+      POSTGRES_USER: it_admin
+      POSTGRES_PASSWORD: local-admin
+      POSTGRES_DB: it_admin
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/roles.sql:/setup/roles.sql:ro
+      - ./database/permissions.sql:/setup/permissions.sql:ro
+      - ./database/local-init.sql:/docker-entrypoint-initdb.d/zz-local-init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U it_admin -d it_admin']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  postgres-data:

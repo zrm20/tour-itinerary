@@ -13,3 +13,4 @@
 **/*.tfvars
 !**/*.tfvars.example
 **/gha-creds-*.json
+backend/src/generated/

@@ -1,5 +1,16 @@
 import { spawnSync } from 'node:child_process';
 import { expect, test } from 'vitest';
+import { localTarget } from '../scripts/database.mjs';
+
+test.each(['shadow', 'test-admin'] as const)(
+  '%s refuses the wrong database role',
+  (kind) => {
+    const database = kind === 'shadow' ? 'it_shadow' : 'it_admin';
+    expect(() =>
+      localTarget(`postgresql://wrong:unused@127.0.0.1/${database}`, kind),
+    ).toThrow();
+  },
+);
 
 test.each([
   'postgresql://it_migration:unused@shared.neon.tech/it_local',

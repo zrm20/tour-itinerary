@@ -9,6 +9,7 @@ export function localTarget(value, kind) {
     throw new Error(`${kind}: explicit database URL required`);
   }
   const name = url.pathname.slice(1);
+  const role = kind === 'test-admin' ? 'it_admin' : 'it_migration';
   const allowed =
     kind === 'test-admin'
       ? name === 'it_admin'
@@ -17,6 +18,7 @@ export function localTarget(value, kind) {
         : name === 'it_local' || /^it_test_[0-9]+$/.test(name);
   if (
     !['postgres:', 'postgresql:'].includes(url.protocol) ||
+    url.username !== role ||
     !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ||
     url.search ||
     url.hash ||
@@ -32,8 +34,6 @@ async function main() {
   if (!['deploy', 'seed', 'dev', 'reset'].includes(command))
     throw new Error('Expected deploy, seed, dev, or reset');
   const url = localTarget(process.env.MIGRATION_DATABASE_URL, 'migration');
-  if (url.username !== 'it_migration')
-    throw new Error('Migration login must be it_migration');
   if (command === 'dev') {
     localTarget(process.env.SHADOW_DATABASE_URL, 'shadow');
     if (url.pathname !== '/it_local')

@@ -1,3 +1,7 @@
+-- Schema reset/replay must preserve the same runtime boundary as bootstrap.
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO it_runtime;
+
 CREATE TABLE "infrastructure_fixture" (
     "key" TEXT NOT NULL,
     "message" TEXT NOT NULL,

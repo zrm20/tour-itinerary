@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import pg from 'pg';
 import { localTarget } from '../scripts/database.mjs';
@@ -33,17 +34,21 @@ const run = (script: string) =>
 beforeAll(async () => {
   await admin.connect();
   await admin.query(`CREATE DATABASE ${database} OWNER it_migration`);
-  const owner = new pg.Client({
-    connectionString: migrationUrl.href,
-    connectionTimeoutMillis: 5000,
-    query_timeout: 6000,
-  });
-  await owner.connect();
-  await owner.query(`REVOKE ALL ON DATABASE ${database} FROM PUBLIC`);
-  await owner.query(`GRANT CONNECT ON DATABASE ${database} TO it_runtime`);
-  await owner.query('REVOKE ALL ON SCHEMA public FROM PUBLIC');
-  await owner.query('GRANT USAGE ON SCHEMA public TO it_runtime');
-  await owner.end();
+  // Use the committed bootstrap SQL in the disposable target database.
+  const setupUrl = new URL(adminUrl);
+  setupUrl.pathname = `/${database}`;
+  const setup = new pg.Client({ connectionString: setupUrl.href });
+  await setup.connect();
+  try {
+    await setup.query(
+      readFileSync('database/permissions.sql', 'utf8').replaceAll(
+        ':"database"',
+        `"${database}"`,
+      ),
+    );
+  } finally {
+    await setup.end();
+  }
   run('deploy');
   run('seed');
   persistence = new FixturePersistence(runtimeUrl.href);
@@ -138,3 +143,29 @@ test.each([
     await runtime.end();
   }
 });
+
+test('connection failure is bounded and the same provider recovers after access returns', async () => {
+  await admin.query(`REVOKE CONNECT ON DATABASE ${database} FROM it_runtime`);
+  try {
+    await admin.query(
+      'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND usename = $2',
+      [database, 'it_runtime'],
+    );
+    const started = performance.now();
+    await expect(persistence.read()).rejects.toThrow();
+    expect(performance.now() - started).toBeLessThan(10000);
+  } finally {
+    await admin.query(`GRANT CONNECT ON DATABASE ${database} TO it_runtime`);
+  }
+  expect(await persistence.read()).toEqual({
+    message: 'Infrastructure probe ready.',
+  });
+});
+
+test('explicit reset and seed restore a readable fixture with runtime permissions', async () => {
+  run('reset');
+  run('seed');
+  expect(await persistence.read()).toEqual({
+    message: 'Infrastructure probe ready.',
+  });
+}, 60000);

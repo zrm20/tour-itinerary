@@ -39,8 +39,6 @@ async function main() {
     if (url.pathname !== '/it_local')
       throw new Error('Author migrations only against it_local');
   }
-  if (command === 'reset' && url.pathname !== '/it_local')
-    throw new Error('Reset is restricted to it_local');
   if (command === 'seed') {
     const client = new pg.Client({
       connectionString: url.href,

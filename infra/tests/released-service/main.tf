@@ -15,7 +15,11 @@ resource "google_cloud_run_service" "api" {
   }
   template {
     metadata {
-      labels = { "source-commit" = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "release-id" = "r123-1" }
+      labels = {
+        "source-commit"              = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        "release-id"                 = "r123-1"
+        "goog-terraform-provisioned" = "true"
+      }
     }
     spec {
       timeout_seconds = 99 # Ordinary drift: plan must restore 30.

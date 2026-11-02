@@ -98,6 +98,10 @@ run "preserve_release_owned_fields" {
     error_message = "Plans must preserve externally released digest, metadata and traffic/tags."
   }
   assert {
+    condition     = lookup(google_cloud_run_service.api[0].template[0].metadata[0].labels, "goog-terraform-provisioned", "") == "true"
+    error_message = "Keep the Terraform attribution label propagated to released revisions."
+  }
+  assert {
     condition = (
       google_cloud_run_service.api[0].template[0].spec[0].timeout_seconds == 30 &&
       !contains(keys(google_cloud_run_service.api[0].metadata[0].annotations), "run.googleapis.com/minScale") &&

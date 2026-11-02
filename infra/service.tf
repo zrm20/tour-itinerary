@@ -15,7 +15,12 @@ resource "google_cloud_run_service" "api" {
   }
   template {
     metadata {
-      labels = { "source-commit" = var.bootstrap_commit, "release-id" = "bootstrap" }
+      # Delivery carries the service's provider attribution label into revisions.
+      labels = {
+        "source-commit"              = var.bootstrap_commit
+        "release-id"                 = "bootstrap"
+        "goog-terraform-provisioned" = "true"
+      }
       annotations = {
         "autoscaling.knative.dev/minScale"     = "0"
         "autoscaling.knative.dev/maxScale"     = "2"

@@ -89,6 +89,7 @@ async function main() {
       {
         stdio: shared ? 'pipe' : 'inherit',
         timeout: 120000,
+        killSignal: 'SIGKILL',
         env: process.env,
       },
     );

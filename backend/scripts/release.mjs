@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { appendFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { boundedProcess } from './bounded-process.mjs';
 import process from 'node:process';
 import { URL } from 'node:url';
 
@@ -21,27 +21,43 @@ async function command(bin, args) {
   return stdout.trim();
 }
 async function persistenceCommand(operation, connection) {
-  await new Promise((resolve, reject) => {
-    const child = spawn('npm', ['run', `db:shared-${operation}`, '--silent'], {
-      cwd: new URL('../', import.meta.url),
-      env: { ...process.env, MIGRATION_DATABASE_URL: connection },
-      stdio: 'ignore',
-      timeout: 120_000,
-      killSignal: 'SIGKILL',
-    });
-    child.once('error', () =>
-      reject(
-        new Error(`${operation} failed; inspect database state privately`),
-      ),
-    );
-    child.once('close', (code) =>
-      code === 0
-        ? resolve()
-        : reject(
-            new Error(`${operation} failed; inspect database state privately`),
-          ),
-    );
+  await boundedProcess('npm', ['run', `db:shared-${operation}`, '--silent'], {
+    cwd: new URL('../', import.meta.url),
+    env: { ...process.env, MIGRATION_DATABASE_URL: connection },
   });
+}
+
+function persistenceConfiguration(state) {
+  const labels = state.metadata.labels ?? {};
+  const legacy =
+    !labels['persistence-mode'] && !labels['migration-secret-version'];
+  const mode = legacy ? 'disabled' : labels['persistence-mode'];
+  if (!['enabled', 'disabled'].includes(mode))
+    throw new Error(
+      'Missing or invalid Terraform persistence mode; reconcile service configuration',
+    );
+  const container = state.spec?.template?.spec?.containers?.[0];
+  const runtime = (container?.env ?? []).filter(
+    (entry) => entry.name === 'DATABASE_URL',
+  );
+  const version = labels['migration-secret-version'];
+  if (mode === 'enabled') {
+    const reference = runtime[0]?.valueFrom?.secretKeyRef;
+    if (
+      !/^[1-9][0-9]*$/.test(version ?? '') ||
+      runtime.length !== 1 ||
+      reference?.name !== 'api-runtime-database-url' ||
+      !/^[1-9][0-9]*$/.test(reference?.key ?? '') ||
+      runtime[0].value
+    )
+      throw new Error('Inconsistent activated persistence configuration');
+    return { mode, version, runtimeVersion: reference.key };
+  }
+  // A legacy service without labels remains health-only, but a runtime setting
+  // without activation metadata must never silently bypass migrations.
+  if (runtime.length || (!legacy && version !== 'disabled'))
+    throw new Error('Inconsistent disabled persistence configuration');
+  return { mode };
 }
 
 async function json(bin, args) {
@@ -284,36 +300,11 @@ async function rollout() {
       image: oldImage,
     };
     report.previous = previous;
-    const labels = initial.metadata.labels ?? {};
-    const legacy =
-      !labels['persistence-mode'] && !labels['migration-secret-version'];
-    const mode = legacy ? 'disabled' : labels['persistence-mode'];
-    // Legacy health-only services remain releasable before the preparation apply.
-    // A runtime secret without the activation metadata always fails closed.
-    if (!['enabled', 'disabled'].includes(mode))
-      throw new Error(
-        'Missing or invalid Terraform persistence mode; reconcile service configuration',
-      );
+    const { mode, version, runtimeVersion } = persistenceConfiguration(initial);
     report.persistence.mode = mode;
-    const container = initial.spec?.template?.spec?.containers?.[0];
-    const runtime = (container?.env ?? []).filter(
-      (entry) => entry.name === 'DATABASE_URL',
-    );
-    const version = labels['migration-secret-version'];
     if (mode === 'enabled') {
-      const reference = runtime[0]?.valueFrom?.secretKeyRef;
-      if (
-        !/^[1-9][0-9]*$/.test(version ?? '') ||
-        runtime.length !== 1 ||
-        reference?.name !== 'api-runtime-database-url' ||
-        !/^[1-9][0-9]*$/.test(reference?.key ?? '') ||
-        runtime[0].value
-      )
-        throw new Error('Inconsistent activated persistence configuration');
       report.persistence.migrationSecret = `api-migration-database-url/versions/${version}`;
-      report.persistence.runtimeSecret = `api-runtime-database-url/versions/${reference.key}`;
-    } else if (runtime.length || (!legacy && version !== 'disabled')) {
-      throw new Error('Inconsistent disabled persistence configuration');
+      report.persistence.runtimeSecret = `api-runtime-database-url/versions/${runtimeVersion}`;
     }
     if (
       mode === 'disabled' &&
@@ -389,6 +380,11 @@ async function rollout() {
         report.result = 'persistence verified; already serving checked commit';
         return;
       }
+    }
+    if (!(await eligible())) {
+      report.result =
+        'skipped superseded release after persistence; schema changes retained';
+      return;
     }
     // Remove only obsolete candidate tags, preserving explicit normal traffic.
     mutationAttempted = true;

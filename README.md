@@ -10,7 +10,7 @@ The agreed [backend architecture and stack](backend/backend.md) use TypeScript, 
 
 Initial authentication uses Better Auth with its OAuth Provider and JWT plugins in an isolated identity-provider module. The client-agnostic API uses `@nestjs/authentication` to validate bearer access tokens, with application-owned user IDs and permissions independent of the provider. The initial account flows are for early development only; see [the authentication decision](docs/adr/0008-operate-authentication-in-an-isolated-oidc-module.md).
 
-The architecture above records the agreed stack. GraphQL, persistence, and authentication are not implemented in the health-only application. GitHub Actions verifies and releases the health-only production image to the shared development Cloud Run service. See the [Google Cloud operating guide](docs/operations/google-cloud.md) for bootstrap, billing controls, deployment inspection, retention, and recovery. Account-specific deployment evidence is recorded in GitHub Issues.
+The architecture above records the agreed stack. GraphQL and authentication are not implemented in the health-only application. The local PostgreSQL/Prisma persistence foundation is described in [the persistence guide](docs/persistence.md). GitHub Actions verifies and releases the health-only production image to the shared development Cloud Run service. See the [Google Cloud operating guide](docs/operations/google-cloud.md) for bootstrap, billing controls, deployment inspection, retention, and recovery. Account-specific deployment evidence is recorded in GitHub Issues.
 
 ## Backend development
 
@@ -51,7 +51,7 @@ Run these commands from `backend/`:
 | `npm run build`                | Compile production JavaScript to `dist/`                   |
 | `npm run start:prod`           | Run the compiled `dist/main.js`                            |
 
-`check` reports formatting/lint failures without modifying source and runs independently of Docker. Build outputs are gitignored. The HTTP integration tests boot Nest with the Express adapter and listen on an ephemeral loopback port; startup tests exercise the real application module's configuration validation.
+`check` reports formatting/lint failures without modifying source and runs independently of Docker. Persistence integration tests require an explicitly configured isolated PostgreSQL instance; see [local persistence setup and verification](docs/persistence.md#verification). Build outputs are gitignored. The HTTP integration tests boot Nest with the Express adapter and listen on an ephemeral loopback port; startup tests exercise the real application module's configuration validation.
 
 ### Environment configuration
 
@@ -63,7 +63,7 @@ The startup scripts load the optional, gitignored `backend/.env` using Node's na
 | `PORT`       | `3000`        | Decimal integer from `1` to `65535`                                          |
 | `COMMIT_SHA` | `local`       | Full 40-character lowercase Git SHA; `local` allowed only outside production |
 
-Empty or invalid settings fail at startup with the setting's name. `COMMIT_SHA` is required in production; the application does not invoke Git or contact a service to discover it. Configuration is typed and validated before listening. No database settings are consumed.
+Empty or invalid settings fail at startup with the setting's name. `COMMIT_SHA` is required in production; the application does not invoke Git or contact a service to discover it. Configuration is typed and validated before listening. The health-only application consumes no database settings. Local database tools use separate connections documented in [the persistence guide](docs/persistence.md).
 
 To verify the compiled application locally with a source SHA:
 

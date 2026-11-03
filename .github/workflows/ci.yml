@@ -11,6 +11,17 @@ jobs:
     timeout-minutes: 15
     env:
       IMAGE_NAME: tour-itinerary-api:${{ github.sha }}
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_USER: it_admin
+          POSTGRES_PASSWORD: local-admin
+          POSTGRES_DB: it_admin
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U it_admin -d it_admin"
+          --health-interval 2s --health-timeout 3s --health-retries 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -21,8 +32,19 @@ jobs:
       - name: Install locked dependencies
         working-directory: backend
         run: npm ci
+      - name: Prepare isolated PostgreSQL roles
+        env:
+          PGPASSWORD: local-admin
+        run: |
+          psql -h 127.0.0.1 -U it_admin -d it_admin -v ON_ERROR_STOP=1 -f backend/database/roles.sql
+          psql -h 127.0.0.1 -U it_admin -d it_admin -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER ROLE it_migration PASSWORD 'local-migration';
+          ALTER ROLE it_runtime PASSWORD 'local-runtime';
+          SQL
       - name: Run shared project checks
         working-directory: backend
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://it_admin:local-admin@127.0.0.1:5432/it_admin
         run: npm run check
       - name: Build production image
         uses: docker/build-push-action@v7

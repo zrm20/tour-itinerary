@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**'] },
+  { ignores: ['dist/**', 'coverage/**', 'src/generated/**'] },
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
   {
@@ -20,6 +20,8 @@ export default tseslint.config(
     languageOptions: {
       globals: {
         AbortSignal: 'readonly',
+        URL: 'readonly',
+        process: 'readonly',
         console: 'readonly',
         fetch: 'readonly',
         setTimeout: 'readonly',

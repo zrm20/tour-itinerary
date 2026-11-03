@@ -3,6 +3,8 @@
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import process from 'node:process';
+import { spawn } from 'node:child_process';
+import { setInterval } from 'node:timers';
 
 const [bin, ...args] = process.argv.slice(1);
 const state = JSON.parse(readFileSync(process.env.SIMULATION_STATE, 'utf8'));
@@ -11,6 +13,13 @@ appendFileSync(
   `${basename(bin)} ${args.join(' ')}\n`,
 );
 const scenario = process.env.SIMULATION_SCENARIO;
+const persistence = process.env.SIMULATION_PERSISTENCE;
+const activated = ![
+  'legacy',
+  'disabled',
+  'disabled-with-runtime',
+  'bogus',
+].includes(persistence);
 const print = (value) => console.log(JSON.stringify(value));
 const save = () =>
   writeFileSync(process.env.SIMULATION_STATE, JSON.stringify(state));
@@ -46,12 +55,57 @@ if (basename(bin) === 'gh') {
       object: {
         sha:
           scenario === 'stale' ||
-          (scenario === 'superseded' && state.headReads > 1)
+          (scenario === 'superseded' && state.headReads > 1) ||
+          (scenario === 'superseded-after-secret' && state.secretRead) ||
+          (scenario === 'superseded-after-migration' && state.migrated)
             ? 'c'.repeat(40)
             : 'b'.repeat(40),
       },
     });
   }
+} else if (basename(bin) === 'npm') {
+  if (args[0] === 'ci') {
+    // Locked dependency installation is an external process boundary.
+  } else if (args[1] === 'db:shared-deploy') {
+    if (
+      !process.env.MIGRATION_DATABASE_URL?.includes('private-database-password')
+    )
+      throw new Error('Missing in-memory migration credential');
+    state.migrated = true;
+    save();
+    if (scenario === 'migration-hangs') {
+      const background = spawn(
+        process.execPath,
+        ['-e', 'setInterval(() => {}, 1000)'],
+        { stdio: 'ignore' },
+      );
+      state.backgroundPid = background.pid;
+      save();
+      setInterval(() => {}, 1000);
+    }
+    if (scenario === 'migration-fails') {
+      console.error('private-database-password: partial migration failed');
+      process.exitCode = 1;
+    }
+  } else if (args[1] === 'db:shared-seed') {
+    if (!state.migrated) throw new Error('Seed preceded migration');
+    if (scenario === 'seed-fails') {
+      console.error('private-database-password: seed failed');
+      process.exitCode = 1;
+    } else {
+      state.seeded = true;
+      save();
+    }
+  } else throw new Error('Unexpected npm operation');
+} else if (args[0] === 'secrets') {
+  if (args[3] !== '7' || flag('--secret') !== 'api-migration-database-url')
+    throw new Error('Unexpected secret/version request');
+  state.secretRead = true;
+  save();
+  if (scenario === 'secret-denied') process.exitCode = 1;
+  console.log(
+    'postgresql://it_migration:private-database-password@ep-test.us-east-1.aws.neon.tech/tour_itinerary?sslmode=verify-full&connect_timeout=10',
+  );
 } else if (args[0] === 'artifacts') {
   if (args.slice(1, 4).join(' ') === 'docker tags add') {
     // Docker's tag command deletes existing tags, which Writer cannot do.
@@ -110,7 +164,53 @@ if (basename(bin) === 'gh') {
   if (scenario === 'no-service') fail();
   else
     print({
-      metadata: { generation: '1' },
+      metadata: {
+        generation: '1',
+        labels:
+          persistence === 'legacy'
+            ? {}
+            : {
+                'persistence-mode': activated
+                  ? 'enabled'
+                  : persistence === 'disabled-with-runtime'
+                    ? 'disabled'
+                    : persistence,
+                'migration-secret-version':
+                  persistence === 'mutable-migration'
+                    ? 'latest'
+                    : activated
+                      ? '7'
+                      : 'disabled',
+              },
+      },
+      spec: {
+        template: {
+          spec: {
+            containers: [
+              {
+                env:
+                  (activated && persistence !== 'missing-runtime') ||
+                  persistence === 'disabled-with-runtime'
+                    ? [
+                        {
+                          name: 'DATABASE_URL',
+                          valueFrom: {
+                            secretKeyRef: {
+                              name: 'api-runtime-database-url',
+                              key:
+                                persistence === 'mutable-runtime'
+                                  ? 'latest'
+                                  : '4',
+                            },
+                          },
+                        },
+                      ]
+                    : [],
+              },
+            ],
+          },
+        },
+      },
       status: {
         observedGeneration: '1',
         url: state.url,
@@ -145,6 +245,8 @@ if (basename(bin) === 'gh') {
     },
   });
 } else if (args.includes('deploy')) {
+  if (activated && !state.seeded)
+    throw new Error('Candidate preceded persistence');
   state.tagged = true;
   save();
   if (scenario === 'deploy-timeout') fail();

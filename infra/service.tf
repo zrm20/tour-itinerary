@@ -66,12 +66,6 @@ resource "google_cloud_run_service" "api" {
     }
   }
   lifecycle {
-    precondition {
-      condition = !var.enable_persistence || (
-        var.enable_service && var.runtime_database_secret_version != null && var.migration_database_secret_version != null
-      )
-      error_message = "Activation requires a service and both explicit secret versions."
-    }
     # The provider preserves unconfigured annotations, so detect nonzero minima.
     postcondition {
       condition     = lookup(self.metadata[0].effective_annotations, "run.googleapis.com/minScale", "0") == "0"

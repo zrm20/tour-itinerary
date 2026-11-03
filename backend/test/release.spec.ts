@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   mkdtemp,
   copyFile,
@@ -20,12 +20,16 @@ type State = {
   url: string;
   traffic: { revisionName: string; percent: number }[];
   registryTags: Record<string, string>;
+  migrated?: boolean;
+  seeded?: boolean;
+  backgroundPid?: number;
 };
 
 async function simulate(
   scenario = 'success',
   failCheck = 'none',
   mode = 'rollout',
+  persistence = 'legacy',
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'delivery-'));
   const statePath = join(directory, 'state.json');
@@ -63,7 +67,7 @@ async function simulate(
               },
       }),
     );
-    for (const name of ['gh', 'gcloud']) {
+    for (const name of ['gh', 'gcloud', 'npm']) {
       await copyFile(
         resolve('test/fixtures/delivery-cli.mjs'),
         join(directory, name),
@@ -80,6 +84,12 @@ async function simulate(
           SIMULATION_STATE: statePath,
           SIMULATION_CALLS: callsPath,
           SIMULATION_SCENARIO: scenario,
+          SIMULATION_PERSISTENCE: persistence,
+          ...(scenario === 'migration-hangs'
+            ? {
+                NODE_OPTIONS: `--import=${resolve('test/fixtures/delivery-clock.mjs')}`,
+              }
+            : {}),
           GITHUB_REPOSITORY: 'zrm20/tour-itinerary',
           CI_RUN_ID: '456',
           GITHUB_RUN_ID: '123',
@@ -285,4 +295,157 @@ it('reports the missing first service without deploying or inventing a fallback'
   expect(result.calls).not.toContain('run deploy');
   expect(result.calls).not.toContain('update-traffic');
   expect(result.output).toContain('first bootstrap has no automatic fallback');
+});
+
+it('migrates and seeds activated persistence before creating the verified candidate', async () => {
+  const result = await simulate('success', 'none', 'rollout', 'enabled');
+  expect(result.exitCode, result.output).toBe(0);
+  expect(result.state.migrated).toBe(true);
+  expect(result.state.seeded).toBe(true);
+  expect(result.state.traffic).toEqual([
+    { revisionName: candidate, percent: 100 },
+  ]);
+  expect(result.output).toContain('"migration": "passed"');
+  expect(result.output).toContain('"seed": "passed"');
+  expect(result.output).toContain('api-migration-database-url/versions/7');
+  expect(result.output).toContain('api-runtime-database-url/versions/4');
+  expect(result.output).not.toContain('private-database-password');
+});
+
+it('keeps explicitly disabled delivery free of database prerequisites', async () => {
+  const result = await simulate('success', 'none', 'rollout', 'disabled');
+  expect(result.exitCode, result.output).toBe(0);
+  expect(result.output).toContain('"mode": "disabled"');
+  expect(result.calls).not.toContain('secrets versions access');
+  expect(result.calls).not.toContain('npm');
+});
+
+it.each(['migration-fails', 'seed-fails', 'secret-denied'])(
+  'stops activated delivery without candidate or traffic mutation: %s',
+  async (scenario) => {
+    const result = await simulate(scenario, 'none', 'rollout', 'enabled');
+    expect(result.exitCode).toBe(1);
+    expect(result.state.traffic).toEqual([
+      { revisionName: previous, percent: 100 },
+    ]);
+    expect(result.calls).not.toContain('run deploy');
+    expect(result.calls).not.toContain('update-traffic');
+    expect(result.output).not.toContain('private-database-password');
+    if (scenario === 'migration-fails') {
+      expect(result.state.migrated).toBe(true); // A failed command may already have applied SQL.
+      expect(result.calls).not.toContain('db:shared-seed');
+      expect(result.output).toContain('partial database changes may remain');
+    }
+    if (scenario === 'seed-fails') {
+      expect(result.state.migrated).toBe(true);
+      expect(result.output).toContain('"migration": "passed"');
+      expect(result.output).toContain(
+        '"seed": "failed; partial database changes may remain"',
+      );
+    }
+  },
+);
+
+it.each(['stale', 'superseded', 'superseded-after-secret'])(
+  'does not mutate the shared database for a superseded release: %s',
+  async (scenario) => {
+    const result = await simulate(scenario, 'none', 'rollout', 'enabled');
+    expect(result.exitCode, result.output).toBe(0);
+    expect(result.state.migrated).toBeUndefined();
+    expect(result.calls).not.toContain('db:shared-deploy');
+    expect(result.calls).not.toContain('run deploy');
+    expect(result.calls).not.toContain('update-traffic');
+    expect(result.output).toContain('skipped superseded release');
+  },
+);
+
+it('retains successful schema changes if main is superseded before service mutation', async () => {
+  const result = await simulate(
+    'superseded-after-migration',
+    'none',
+    'rollout',
+    'enabled',
+  );
+  expect(result.exitCode, result.output).toBe(0);
+  expect(result.state.migrated).toBe(true);
+  expect(result.state.seeded).toBe(true);
+  expect(result.calls).not.toContain('run deploy');
+  expect(result.calls).not.toContain('update-traffic');
+  expect(result.output).toContain('schema changes retained');
+});
+
+it('runs activated migration and seed even when the checked commit is already serving', async () => {
+  const result = await simulate(
+    'already-current',
+    'none',
+    'rollout',
+    'enabled',
+  );
+  expect(result.exitCode, result.output).toBe(0);
+  expect(result.state.migrated).toBe(true);
+  expect(result.state.seeded).toBe(true);
+  expect(result.calls).not.toContain('run deploy');
+  expect(result.output).toContain(
+    'persistence verified; already serving checked commit',
+  );
+});
+
+it.each([
+  'missing-runtime',
+  'mutable-runtime',
+  'mutable-migration',
+  'disabled-with-runtime',
+  'bogus',
+])(
+  'fails closed for inconsistent persistence configuration: %s',
+  async (persistence) => {
+    const result = await simulate('success', 'none', 'rollout', persistence);
+    expect(result.exitCode).toBe(1);
+    expect(result.calls).not.toContain('secrets versions access');
+    expect(result.calls).not.toContain('db:shared');
+    expect(result.calls).not.toContain('run deploy');
+    expect(result.calls).not.toContain('update-traffic');
+  },
+);
+
+it.each(['candidate', 'normal'])(
+  'retains migrations and seed while preserving/restoring previous traffic after %s failure',
+  async (phase) => {
+    const result = await simulate('success', phase, 'rollout', 'enabled');
+    expect(result.exitCode).toBe(1);
+    expect(result.state.migrated).toBe(true);
+    expect(result.state.seeded).toBe(true);
+    expect(result.state.traffic).toEqual([
+      { revisionName: previous, percent: 100 },
+    ]);
+    expect(result.calls).not.toMatch(/reset|resolve|migrate dev/);
+    expect(result.output).toContain(
+      phase === 'normal'
+        ? 'previous revision restored and verified'
+        : 'previous traffic preserved and verified',
+    );
+    expect(result.output).not.toContain('private-database-password');
+  },
+);
+
+it('bounds a hung migration and terminates its descendants before reporting failure', async () => {
+  const result = await simulate(
+    'migration-hangs',
+    'none',
+    'rollout',
+    'enabled',
+  );
+  expect(result.exitCode).toBe(1);
+  expect(result.output).toContain(
+    '"migration": "failed; partial database changes may remain"',
+  );
+  expect(result.calls).not.toContain('db:shared-seed');
+  expect(result.calls).not.toContain('run deploy');
+  expect(result.state.backgroundPid).toBeTypeOf('number');
+  const processState = spawnSync(
+    'ps',
+    ['-o', 'stat=', '-p', String(result.state.backgroundPid)],
+    { encoding: 'utf8' },
+  );
+  expect(processState.stdout.trim()).toMatch(/^Z|^$/); // Exited, or awaiting init's reaping.
 });

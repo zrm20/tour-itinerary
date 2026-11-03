@@ -27,6 +27,6 @@ test.each([
     },
   );
   expect(result.status).toBe(1);
-  expect(result.stderr).toContain('check isolated target configuration');
+  expect(result.stderr).toContain('inspect target configuration');
   expect(result.stderr).not.toContain('unused');
 });

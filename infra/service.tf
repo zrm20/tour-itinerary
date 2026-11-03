@@ -7,6 +7,10 @@ resource "google_cloud_run_service" "api" {
   autogenerate_revision_name = true
   deletion_policy            = "DELETE" # Disposable development environment.
   metadata {
+    labels = {
+      "persistence-mode"         = var.enable_persistence ? "enabled" : "disabled"
+      "migration-secret-version" = var.enable_persistence ? var.migration_database_secret_version : "disabled"
+    }
     annotations = {
       # Cloud Run omits minScale=0 on read; an absent service minimum means zero.
       "run.googleapis.com/ingress"  = "all"
@@ -34,6 +38,18 @@ resource "google_cloud_run_service" "api" {
       container_concurrency = 80
       containers {
         image = var.bootstrap_image
+        dynamic "env" {
+          for_each = var.enable_persistence ? [1] : []
+          content {
+            name = "DATABASE_URL"
+            value_from {
+              secret_key_ref {
+                name = google_secret_manager_secret.runtime_database.secret_id
+                key  = var.runtime_database_secret_version
+              }
+            }
+          }
+        }
         ports { container_port = 8080 }
         resources { limits = { cpu = "1", memory = "512Mi" } }
         startup_probe {
@@ -50,6 +66,12 @@ resource "google_cloud_run_service" "api" {
     }
   }
   lifecycle {
+    precondition {
+      condition = !var.enable_persistence || (
+        var.enable_service && var.runtime_database_secret_version != null && var.migration_database_secret_version != null
+      )
+      error_message = "Activation requires a service and both explicit secret versions."
+    }
     # The provider preserves unconfigured annotations, so detect nonzero minima.
     postcondition {
       condition     = lookup(self.metadata[0].effective_annotations, "run.googleapis.com/minScale", "0") == "0"
@@ -79,7 +101,7 @@ resource "google_cloud_run_service" "api" {
       traffic,
     ]
   }
-  depends_on = [google_project_service.api]
+  depends_on = [google_project_service.api, google_secret_manager_secret_iam_member.runtime_database]
 }
 resource "google_cloud_run_service_iam_member" "public" {
   count    = var.enable_service ? 1 : 0

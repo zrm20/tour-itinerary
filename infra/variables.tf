@@ -38,3 +38,33 @@ variable "bootstrap_commit" {
   default     = null
   description = "Full checked main commit matching bootstrap_image."
 }
+
+variable "enable_persistence" {
+  type        = bool
+  default     = false
+  description = "Engineer-controlled activation gate; coordinate applies with development delivery. Never disable to bypass a migration failure."
+  validation {
+    condition = !var.enable_persistence || (
+      var.enable_service && var.runtime_database_secret_version != null && var.migration_database_secret_version != null
+    )
+    error_message = "Activation requires an existing service and both explicit secret versions."
+  }
+}
+variable "runtime_database_secret_version" {
+  type        = string
+  default     = null
+  description = "Explicit positive numeric runtime secret version; no payloads or latest aliases."
+  validation {
+    condition     = var.runtime_database_secret_version == null ? true : can(regex("^[1-9][0-9]*$", var.runtime_database_secret_version))
+    error_message = "Use an explicit positive numeric secret version."
+  }
+}
+variable "migration_database_secret_version" {
+  type        = string
+  default     = null
+  description = "Explicit positive numeric migration secret version; no payloads or latest aliases."
+  validation {
+    condition     = var.migration_database_secret_version == null ? true : can(regex("^[1-9][0-9]*$", var.migration_database_secret_version))
+    error_message = "Use an explicit positive numeric secret version."
+  }
+}

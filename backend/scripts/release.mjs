@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { appendFile } from 'node:fs/promises';
+import { boundedProcess } from './bounded-process.mjs';
 import process from 'node:process';
 import { URL } from 'node:url';
 
@@ -19,6 +20,46 @@ async function command(bin, args) {
   });
   return stdout.trim();
 }
+async function persistenceCommand(operation, connection) {
+  await boundedProcess('npm', ['run', `db:shared-${operation}`, '--silent'], {
+    cwd: new URL('../', import.meta.url),
+    env: { ...process.env, MIGRATION_DATABASE_URL: connection },
+  });
+}
+
+function persistenceConfiguration(state) {
+  const labels = state.metadata.labels ?? {};
+  const legacy =
+    !labels['persistence-mode'] && !labels['migration-secret-version'];
+  const mode = legacy ? 'disabled' : labels['persistence-mode'];
+  if (!['enabled', 'disabled'].includes(mode))
+    throw new Error(
+      'Missing or invalid Terraform persistence mode; reconcile service configuration',
+    );
+  const container = state.spec?.template?.spec?.containers?.[0];
+  const runtime = (container?.env ?? []).filter(
+    (entry) => entry.name === 'DATABASE_URL',
+  );
+  const version = labels['migration-secret-version'];
+  if (mode === 'enabled') {
+    const reference = runtime[0]?.valueFrom?.secretKeyRef;
+    if (
+      !/^[1-9][0-9]*$/.test(version ?? '') ||
+      runtime.length !== 1 ||
+      reference?.name !== 'api-runtime-database-url' ||
+      !/^[1-9][0-9]*$/.test(reference?.key ?? '') ||
+      runtime[0].value
+    )
+      throw new Error('Inconsistent activated persistence configuration');
+    return { mode, version, runtimeVersion: reference.key };
+  }
+  // A legacy service without labels remains health-only, but a runtime setting
+  // without activation metadata must never silently bypass migrations.
+  if (runtime.length || (!legacy && version !== 'disabled'))
+    throw new Error('Inconsistent disabled persistence configuration');
+  return { mode };
+}
+
 async function json(bin, args) {
   return JSON.parse(await command(bin, args));
 }
@@ -109,6 +150,7 @@ async function rollout() {
     serviceUrl: null,
     previous: null,
     checks: {},
+    persistence: { mode: 'unknown', migration: 'not run', seed: 'not run' },
     recovery: 'not needed',
     finalTraffic: null,
     workflow: `https://github.com/${repo()}/actions/runs/${runId}/attempts/${attempt}`,
@@ -258,17 +300,90 @@ async function rollout() {
       image: oldImage,
     };
     report.previous = previous;
-    if (oldCommit === sha && process.env.FAIL_CHECK === 'none') {
+    const { mode, version, runtimeVersion } = persistenceConfiguration(initial);
+    report.persistence.mode = mode;
+    if (mode === 'enabled') {
+      report.persistence.migrationSecret = `api-migration-database-url/versions/${version}`;
+      report.persistence.runtimeSecret = `api-runtime-database-url/versions/${runtimeVersion}`;
+    }
+    if (
+      mode === 'disabled' &&
+      oldCommit === sha &&
+      process.env.FAIL_CHECK === 'none'
+    ) {
       await settled(previous.revision);
       await health(report.serviceUrl, sha, 'current');
       report.result = 'already serving checked commit';
       return;
     }
     await health(report.serviceUrl, oldCommit, 'previous');
+    if (mode === 'enabled') {
+      await command('npm', [
+        'ci',
+        '--prefix',
+        new URL('../', import.meta.url).pathname,
+        '--no-audit',
+        '--no-fund',
+      ]);
+    }
     // Protect the captured serving image without replacing the prior rollback image.
     await protectImage(oldImage, 'current');
     if (!(await eligible())) {
       report.result = 'skipped superseded release';
+      return;
+    }
+    report.persistence.eligibility =
+      'current checked main before first database/service mutation';
+    if (mode === 'enabled') {
+      let connection;
+      try {
+        // Fetch only the explicitly selected version; never log stdout/errors.
+        connection = await command('gcloud', [
+          'secrets',
+          'versions',
+          'access',
+          version,
+          '--secret',
+          'api-migration-database-url',
+          '--project',
+          project,
+          '--quiet',
+        ]);
+      } catch {
+        throw new Error(
+          'Migration secret retrieval failed; inspect version/access privately',
+        );
+      }
+      if (!(await eligible())) {
+        report.result = 'skipped superseded release';
+        report.persistence.eligibility =
+          'superseded before first database mutation';
+        return;
+      }
+      for (const operation of ['deploy', 'seed']) {
+        const outcome = operation === 'deploy' ? 'migration' : 'seed';
+        try {
+          await persistenceCommand(operation, connection);
+          report.persistence[outcome] = 'passed';
+        } catch {
+          report.persistence[outcome] =
+            'failed; partial database changes may remain';
+          throw new Error(
+            `${outcome} failed; inspect actual database state before deliberate repair/retry`,
+          );
+        }
+      }
+      connection = undefined;
+      if (oldCommit === sha && process.env.FAIL_CHECK === 'none') {
+        await settled(previous.revision);
+        await health(report.serviceUrl, sha, 'current');
+        report.result = 'persistence verified; already serving checked commit';
+        return;
+      }
+    }
+    if (!(await eligible())) {
+      report.result =
+        'skipped superseded release after persistence; schema changes retained';
       return;
     }
     // Remove only obsolete candidate tags, preserving explicit normal traffic.
@@ -356,6 +471,9 @@ async function rollout() {
       } catch (failure) {
         report.recovery = `ROLLBACK/RECONCILIATION FAILED: ${String(failure)}; engineer recovery required`;
       }
+    } else if (previous) {
+      report.recovery =
+        'No service mutation; previous traffic unchanged. Database changes are not rolled back.';
     } else if (!previous) {
       report.recovery =
         'No service mutation; first bootstrap has no automatic fallback. Verify manually.';

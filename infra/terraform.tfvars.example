@@ -7,3 +7,8 @@ enable_service  = false
 # enable_service  = true
 # bootstrap_image = "us-east4-docker.pkg.dev/PROJECT/tour-itinerary/api@sha256:..."
 # bootstrap_commit = "40-character-checked-main-sha"
+
+# Engineer persistence checkpoint only; no secret VALUES in Terraform.
+enable_persistence = false
+# runtime_database_secret_version = "1"
+# migration_database_secret_version = "1"

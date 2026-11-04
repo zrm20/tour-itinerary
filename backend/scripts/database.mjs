@@ -29,20 +29,47 @@ export function localTarget(value, kind) {
   return url;
 }
 
+// Shared targets have a separate non-destructive entry point. Local reset/dev
+// guards remain unchanged and can never accept Neon URLs.
+function sharedTarget(value) {
+  const url = new URL(value);
+  const keys = [...url.searchParams.keys()].sort().join(',');
+  if (
+    !['postgres:', 'postgresql:'].includes(url.protocol) ||
+    url.username !== 'it_migration' ||
+    !url.password ||
+    !/^[a-z0-9.-]+[.]neon[.]tech$/.test(url.hostname) ||
+    url.hostname.includes('-pooler') ||
+    url.pathname !== '/tour_itinerary' ||
+    (url.port && url.port !== '5432') ||
+    url.hash ||
+    keys !== 'connect_timeout,sslmode' ||
+    url.searchParams.get('sslmode') !== 'verify-full' ||
+    url.searchParams.get('connect_timeout') !== '10'
+  )
+    throw new Error('Refusing shared migration target');
+  return url;
+}
+
 async function main() {
   const command = process.argv[2];
-  if (!['deploy', 'seed', 'dev', 'reset'].includes(command))
+  const shared = ['shared-deploy', 'shared-seed'].includes(command);
+  const operation = shared ? command.slice(7) : command;
+  if (!['deploy', 'seed', 'dev', 'reset'].includes(operation))
     throw new Error('Expected deploy, seed, dev, or reset');
-  const url = localTarget(process.env.MIGRATION_DATABASE_URL, 'migration');
-  if (command === 'dev') {
+  const url = shared
+    ? sharedTarget(process.env.MIGRATION_DATABASE_URL)
+    : localTarget(process.env.MIGRATION_DATABASE_URL, 'migration');
+  if (operation === 'dev') {
     localTarget(process.env.SHADOW_DATABASE_URL, 'shadow');
     if (url.pathname !== '/it_local')
       throw new Error('Author migrations only against it_local');
   }
-  if (command === 'seed') {
+  if (operation === 'seed') {
     const client = new pg.Client({
       connectionString: url.href,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: shared ? 10000 : 5000,
+      statement_timeout: 5000,
       query_timeout: 6000,
     });
     try {
@@ -55,11 +82,16 @@ async function main() {
       await client.end();
     }
   } else {
-    const args = command === 'reset' ? ['reset', '--force'] : [command];
+    const args = operation === 'reset' ? ['reset', '--force'] : [operation];
     const result = spawnSync(
       process.execPath,
       ['node_modules/prisma/build/index.js', 'migrate', ...args],
-      { stdio: 'inherit', env: process.env },
+      {
+        stdio: shared ? 'pipe' : 'inherit',
+        timeout: 120000,
+        killSignal: 'SIGKILL',
+        env: process.env,
+      },
     );
     if (result.error || result.status !== 0)
       throw new Error('Migration command failed');
@@ -69,7 +101,7 @@ async function main() {
 if (process.argv[1]?.endsWith('/database.mjs')) {
   main().catch(() => {
     console.error(
-      'Database command failed; check isolated target configuration and migration state.',
+      'Database command failed; inspect target configuration and actual migration state privately.',
     );
     process.exitCode = 1;
   });

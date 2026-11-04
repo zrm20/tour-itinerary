@@ -10,7 +10,7 @@ resource "google_project_service" "api" {
     "artifactregistry.googleapis.com", "run.googleapis.com", "iam.googleapis.com",
     "iamcredentials.googleapis.com", "sts.googleapis.com", "cloudbilling.googleapis.com",
     "billingbudgets.googleapis.com", "cloudresourcemanager.googleapis.com",
-    "serviceusage.googleapis.com", "storage.googleapis.com",
+    "serviceusage.googleapis.com", "storage.googleapis.com", "secretmanager.googleapis.com",
   ])
   service            = each.key
   disable_on_destroy = false
@@ -53,7 +53,7 @@ resource "google_service_account" "deploy" {
 }
 resource "google_service_account" "runtime" {
   account_id   = "api-runtime"
-  display_name = "Health-only API; no application IAM grants"
+  display_name = "API runtime; individual runtime database secret only"
   depends_on   = [google_project_service.api]
 }
 resource "google_iam_workload_identity_pool" "github" {

@@ -26,7 +26,9 @@
     "db:dev": "node --env-file-if-exists=.env scripts/database.mjs dev",
     "db:reset": "node --env-file-if-exists=.env scripts/database.mjs reset",
     "precheck": "npm run generate",
-    "pretest:watch": "npm run generate"
+    "pretest:watch": "npm run generate",
+    "db:shared-deploy": "node scripts/database.mjs shared-deploy",
+    "db:shared-seed": "node scripts/database.mjs shared-seed"
   },
   "dependencies": {
     "@nestjs/common": "12.3.2",

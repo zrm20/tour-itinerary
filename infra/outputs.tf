@@ -4,3 +4,7 @@ output "deployment_service_account" { value = google_service_account.deploy.emai
 output "image_repository" { value = "us-east4-docker.pkg.dev/${var.project_id}/tour-itinerary/api" }
 output "service_name" { value = local.service }
 output "service_url" { value = try(google_cloud_run_service.api[0].status[0].url, null) }
+
+output "runtime_database_secret" { value = google_secret_manager_secret.runtime_database.secret_id }
+output "migration_database_secret" { value = google_secret_manager_secret.migration_database.secret_id }
+output "persistence_mode" { value = var.enable_persistence ? "enabled" : "disabled" }

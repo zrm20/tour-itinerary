@@ -1,5 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import {
+  readFileSync,
+  mkdtempSync,
+  cpSync,
+  symlinkSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import pg from 'pg';
 import { localTarget } from '../scripts/database.mjs';
@@ -42,6 +52,12 @@ beforeAll(async () => {
   try {
     await setup.query(
       readFileSync('database/permissions.sql', 'utf8').replaceAll(
+        ':"database"',
+        `"${database}"`,
+      ),
+    );
+    await setup.query(
+      readFileSync('database/shared-settings.sql', 'utf8').replaceAll(
         ':"database"',
         `"${database}"`,
       ),
@@ -161,6 +177,89 @@ test('connection failure is bounded and the same provider recovers after access 
     message: 'Infrastructure probe ready.',
   });
 });
+
+test('already constructed runtime providers remain compatible after idempotent migration and seed', async () => {
+  run('deploy');
+  run('seed');
+  expect(await persistence.read()).toEqual({
+    message: 'Infrastructure probe ready.',
+  });
+});
+
+test('a real failed seed reports failure and a deliberate repair restores reads', async () => {
+  const owner = new pg.Client({ connectionString: migrationUrl.href });
+  await owner.connect();
+  try {
+    await owner.query(
+      'ALTER TABLE infrastructure_fixture RENAME TO temporarily_unavailable',
+    );
+    try {
+      expect(() => run('seed')).toThrow('Database command failed');
+    } finally {
+      await owner.query(
+        'ALTER TABLE temporarily_unavailable RENAME TO infrastructure_fixture',
+      );
+    }
+    run('seed');
+    expect(await persistence.read()).toEqual({
+      message: 'Infrastructure probe ready.',
+    });
+  } finally {
+    await owner.end();
+  }
+});
+
+test('a failed migration can retain committed SQL while the previous runtime reader remains compatible', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'failed-migration-'));
+  const owner = new pg.Client({ connectionString: migrationUrl.href });
+  await owner.connect();
+  try {
+    // Copy source tooling; inject failure exclusively into this disposable DB.
+    cpSync('prisma', join(directory, 'prisma'), { recursive: true });
+    cpSync('prisma.config.ts', join(directory, 'prisma.config.ts'));
+    mkdirSync(join(directory, 'scripts'));
+    cpSync('scripts/database.mjs', join(directory, 'scripts/database.mjs'));
+    symlinkSync(
+      resolve('node_modules'),
+      join(directory, 'node_modules'),
+      'dir',
+    );
+    const migration = join(
+      directory,
+      'prisma/migrations/20990101000000_isolated_failure',
+    );
+    mkdirSync(migration);
+    writeFileSync(
+      join(migration, 'migration.sql'),
+      'BEGIN; CREATE TABLE partial_fixture (id int); COMMIT; SELECT missing_column FROM infrastructure_fixture;',
+    );
+    expect(() =>
+      execFileSync(process.execPath, ['scripts/database.mjs', 'deploy'], {
+        cwd: directory,
+        env: { ...process.env, MIGRATION_DATABASE_URL: migrationUrl.href },
+        stdio: 'pipe',
+      }),
+    ).toThrow('Database command failed');
+    expect(
+      (
+        await owner.query(
+          "SELECT to_regclass('public.partial_fixture') AS name",
+        )
+      ).rows,
+    ).toEqual([{ name: 'partial_fixture' }]);
+    expect(await persistence.read()).toEqual({
+      message: 'Infrastructure probe ready.',
+    });
+  } finally {
+    // Deliberate isolated-test cleanup, never a shared recovery strategy.
+    await owner.query('DROP TABLE IF EXISTS partial_fixture');
+    await owner.query(
+      "DELETE FROM _prisma_migrations WHERE migration_name = '20990101000000_isolated_failure'",
+    );
+    await owner.end();
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 60000);
 
 test('explicit reset and seed restore a readable fixture with runtime permissions', async () => {
   run('reset');

@@ -1,6 +1,6 @@
 # Google Cloud development operations
 
-Run commands from the repository root unless a section says otherwise. This guide operates the disposable, health-only development API: no database or application secrets are needed. Use the engineer's own Google account for infrastructure and recovery. Normal releases use GitHub federation, a dedicated delivery account, and a separate runtime account with no application IAM grants.
+Run commands from the repository root unless a section says otherwise. This guide operates the disposable development API. Persistence is disabled by default; see [shared persistence bootstrap, activation and recovery](neon.md) for the engineer-controlled database path. Use the engineer's own Google account for infrastructure and recovery. Normal releases use GitHub federation, a dedicated delivery account, and a separate runtime account with access only to its individual runtime database secret.
 
 Use Node from `.nvmrc` (24.22.2), Terraform 1.17.1 with the committed Google 8.9.0 lockfile, GitHub CLI, Google Cloud CLI (release automation pins 591.0.0), and `jq`. Review repository changes before merging and private Terraform plans before applying. Keep state, saved plans, credentials, and account-specific policies out of Git and public artifacts. Commands that display billing or IAM information are for a private terminal.
 
@@ -162,7 +162,7 @@ Compare startup errors and request failures with the selected revision and deplo
 
 ## Manually restore a known revision
 
-1. Pause releases and drain outstanding runs. Inspect actual traffic, then capture the serving revision, full commit, immutable image digest, current/previous registry targets and latest workflow summary privately. Select a retained known-good revision from a successful prior release, not whichever revision happens to be latest. The application is health-only; this procedure restores traffic, not database state or schema.
+1. Pause releases and drain outstanding runs. Inspect actual traffic, then capture the serving revision, full commit, immutable image digest, current/previous registry targets and latest workflow summary privately. Select a retained known-good revision from a successful prior release, not whichever revision happens to be latest. This procedure restores traffic, not database state or schema; verify compatibility and retained secret versions before restoring a database-consuming revision.
 2. Set `RESTORE_REVISION`, `EXPECTED_COMMIT`, `RESTORE_DIGEST` and `RESTORE_VERSION` (`sha256:...`) from that release. Read back the revision and registry version. Confirm it belongs to this service/project and is Ready, its image matches the digest, and the source label matches the full expected commit. Verify its existing tagged health URL first if one remains.
 
    ```sh

@@ -1,12 +1,12 @@
 # Local persistence
 
-The API still serves only `/health` and starts without database configuration. PostgreSQL and Prisma provide the local persistence foundation; no hosted migration or mandatory runtime connection is activated. Only the dedicated non-sensitive infrastructure fixture is modeled. GraphQL and application-domain persistence are absent.
+The API still serves only `/health` and starts without database configuration. PostgreSQL and Prisma provide the local persistence foundation; hosted migration delivery is prepared behind a disabled-by-default engineer gate, with no mandatory runtime connection. See [shared development persistence](operations/neon.md). Only the dedicated non-sensitive infrastructure fixture is modeled. GraphQL and application-domain persistence are absent.
 
 ## Versions and connections
 
 Use PostgreSQL **17.6** (`postgres:17.6-bookworm`) in Compose and CI. PostgreSQL **17** is the intended Neon major; hosted setup remains engineer operated. Prisma client, CLI and PostgreSQL adapter are pinned together at **7.10.1**, a stable release compatible with the pinned Node 24.22.2. Prisma 7 uses `prisma.config.ts` for migration/shadow URLs and the `prisma-client` generator with a PostgreSQL driver adapter for runtime queries.
 
-`DATABASE_URL` is the future runtime SELECT-only connection, `MIGRATION_DATABASE_URL` is the separate direct owner connection, and `SHADOW_DATABASE_URL` is exclusively for local migration authoring. `TEST_ADMIN_DATABASE_URL` is a local disposable-test provisioner, never the application connection. The health-only application does not consume these settings. Never put hosted credentials in these local values or CI.
+`DATABASE_URL` is the future runtime SELECT-only connection, `MIGRATION_DATABASE_URL` is the separate direct owner connection, and `SHADOW_DATABASE_URL` is exclusively for local migration authoring. `TEST_ADMIN_DATABASE_URL` is a local disposable-test provisioner, never the application connection. The health-only application does not consume these settings. Never put hosted credentials in local values or PR CI. Activated keyless delivery fetches only the selected migration Secret Manager version.
 
 ## Start locally
 
@@ -38,7 +38,7 @@ To deliberately erase **only local development data**, run `npm run db:reset`, t
 psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -v database=it_local -f database/permissions.sql
 ```
 
-The migration login owns the database and fixture table and can migrate/seed and grant access. It has no superuser, role creation, replication or database creation power. Runtime gets only CONNECT, public schema USAGE and fixture SELECT. PUBLIC loses database and schema grants. The migration grants SELECT on the fixture explicitly; no broad default grants authorize future tables. The runtime cannot write, create schema objects or alter/drop the fixture. Local administrative credentials are used only for initial setup/test database creation, never by the provider. Shared role/password/bootstrap and deployment configuration require the separate engineer checkpoint.
+The migration login owns the database and fixture table and can migrate/seed and grant access. It has no superuser, role creation, replication or database creation power. Runtime gets only CONNECT, public schema USAGE and fixture SELECT. PUBLIC loses database and schema grants. The migration grants SELECT on the fixture explicitly; no broad default grants authorize future tables. The runtime cannot write, create schema objects or alter/drop the fixture. Local administrative credentials are used only for initial setup/test database creation, never by the provider. Shared role/password/bootstrap and deployment configuration require the separate engineer checkpoint described in the [Neon operating guide](operations/neon.md).
 
 ## Verification
 

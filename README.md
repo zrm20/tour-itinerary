@@ -4,7 +4,7 @@ This repository is for an itinerary app for touring teams. Tour admins build and
 
 Organizations own named tours. Organization owners have authority across their organization. Tour admins can manage their assigned tours and invite read-only tour members; only organization owners can assign tour admins. A user's access is scoped to each tour, so the same person can have different roles on different tours.
 
-The standalone application in `backend/` currently serves only `GET /health`. It runs natively without PostgreSQL or database configuration.
+The standalone application in `backend/` serves independent `GET /health` and the public `POST /graphql` infrastructure probe. It starts natively without PostgreSQL or database configuration; successful probe execution requires the seeded database.
 
 The agreed [backend architecture and stack](backend/backend.md) use TypeScript, Node.js LTS, NestJS, schema-first GraphQL with Apollo Server, Prisma, and PostgreSQL. Hosting is selected as Google Cloud Run for the API and Neon Free for PostgreSQL, with GitHub Actions deploying merges to `main` after checks pass. Vitest is the selected test runner.
 

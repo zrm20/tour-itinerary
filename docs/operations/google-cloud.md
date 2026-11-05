@@ -145,7 +145,7 @@ gcloud run revisions describe "$REVISION" --project="$PROJECT_ID" --region="$REG
 Take `REVISION`, expected full `EXPECTED_COMMIT`, digest and URLs from the successful workflow summary, then compare them with Google Cloud read-back. The traffic-bearing revision is authoritative; `latestReadyRevisionName` can be a failed-check candidate receiving no normal traffic. Health requires HTTP 200, JSON `status: ok` and the exact full commit:
 
 ```sh
-node backend/scripts/verify-health.mjs --url "$SERVICE_URL/health" --commit "$EXPECTED_COMMIT"
+node backend/scripts/verify-health.mjs --url "$SERVICE_URL/health" --commit "$EXPECTED_COMMIT" --probe "$RESTORE_PROBE"
 ```
 
 The verifier makes at most 15 attempts with a two-second request timeout and two seconds between attempts. For a candidate, use its exact tagged URL from `status.traffic`/the workflow summary. A tagged URL alone does not imply a share of normal service traffic.
@@ -163,7 +163,7 @@ Compare startup errors and request failures with the selected revision and deplo
 ## Manually restore a known revision
 
 1. Pause releases and drain outstanding runs. Inspect actual traffic, then capture the serving revision, full commit, immutable image digest, current/previous registry targets and latest workflow summary privately. Select a retained known-good revision from a successful prior release, not whichever revision happens to be latest. This procedure restores traffic, not database state or schema; verify compatibility and retained secret versions before restoring a database-consuming revision.
-2. Set `RESTORE_REVISION`, `EXPECTED_COMMIT`, `RESTORE_DIGEST` and `RESTORE_VERSION` (`sha256:...`) from that release. Read back the revision and registry version. Confirm it belongs to this service/project and is Ready, its image matches the digest, and the source label matches the full expected commit. Verify its existing tagged health URL first if one remains.
+2. Set `RESTORE_REVISION`, `EXPECTED_COMMIT`, `RESTORE_DIGEST` and `RESTORE_VERSION` (`sha256:...`) from that release. Read back the revision and registry version. Confirm it belongs to this service/project and is Ready, its image matches the digest, and the source label matches the full expected commit. Pull the exact immutable image and inspect `org.opencontainers.image.revision` and `dev.tour-itinerary.probe` as described below. Set `RESTORE_PROBE=true` for `graphql-v1`, or `false` for `health-v1` or the explicitly recorded legacy image. Missing/inconsistent capability is a recovery diagnostic; stop and reconcile rather than guessing. Verify its existing tagged health and applicable probe first if a tagged URL remains.
 
    ```sh
    gcloud run revisions describe "$RESTORE_REVISION" --project="$PROJECT_ID" --region="$REGION" \
@@ -182,7 +182,7 @@ Compare startup errors and request failures with the selected revision and deplo
      --to-revisions="$RESTORE_REVISION=100"
    gcloud run services describe "$SERVICE" --project="$PROJECT_ID" --region="$REGION" \
      --format='json(metadata.generation,status.observedGeneration,status.traffic,status.url)'
-   node backend/scripts/verify-health.mjs --url "$SERVICE_URL/health" --commit "$EXPECTED_COMMIT"
+   node backend/scripts/verify-health.mjs --url "$SERVICE_URL/health" --commit "$EXPECTED_COMMIT" --probe "$RESTORE_PROBE"
    ```
 
    Require exactly one positive-percentage target, the selected revision at 100%, and observed generation matching metadata generation. Poll read-back up to six times, two seconds apart, for convergence. A failed/timed-out update command does not prove traffic stayed unchanged: inspect actual allocation and health before deciding the next action. If it does not converge or health fails, report the actual state and retain the maintenance window; do not claim recovery or blindly repeat promotion.

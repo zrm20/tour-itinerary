@@ -12,6 +12,22 @@
     "engineering/codebase-design",
     "engineering/improve-codebase-architecture",
     "engineering/domain-modeling",
-    "productivity/wait-what"
+    "productivity/wait-what",
+    "engineering/grill-with-docs",
+    "engineering/triage",
+    "engineering/diagnosing-bugs",
+    "engineering/pr",
+    "engineering/research",
+    "engineering/prototype",
+    "engineering/ask-matt",
+    "engineering/implement-spec",
+    "engineering/wayfinder",
+    "engineering/retro",
+    "engineering/wizard",
+    "engineering/setup-matt-pocock-skills",
+    "productivity/handoff",
+    "productivity/teach",
+    "productivity/to-questionnaire",
+    "productivity/writing-for-agents"
   ]
 }

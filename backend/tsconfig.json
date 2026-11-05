@@ -20,6 +20,7 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "vitest.config.mts",
-    "prisma.config.ts"
+    "prisma.config.ts",
+    "codegen.ts"
   ]
 }

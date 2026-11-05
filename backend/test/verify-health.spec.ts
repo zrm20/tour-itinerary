@@ -26,13 +26,26 @@ async function serve(handler: RequestListener): Promise<string> {
   return `http://127.0.0.1:${address.port}/health`;
 }
 
-async function verify(url: string): Promise<{
+async function verify(
+  url: string,
+  probe = false,
+): Promise<{
   exitCode: number | null;
   output: string;
 }> {
   const child = spawn(
     process.execPath,
-    [verifier, '--url', url, '--commit', expectedCommit, '--attempts', '1'],
+    [
+      verifier,
+      '--url',
+      url,
+      '--commit',
+      expectedCommit,
+      '--attempts',
+      '1',
+      '--probe',
+      String(probe),
+    ],
     { stdio: ['ignore', 'pipe', 'pipe'] },
   );
   let output = '';
@@ -109,3 +122,48 @@ it('rejects redirects even when their destination returns healthy JSON', async (
   expect(result.exitCode).toBe(1);
   expect(result.output).toContain('expected HTTP 200, received 302');
 });
+
+it.each([
+  [
+    'canonical response',
+    200,
+    '{"data":{"infrastructureProbe":{"message":"Infrastructure probe ready."}}}',
+    0,
+  ],
+  [
+    'null field with errors',
+    200,
+    '{"data":{"infrastructureProbe":null},"errors":[{"message":"Unavailable"}]}',
+    1,
+  ],
+  [
+    'wrong message',
+    200,
+    '{"data":{"infrastructureProbe":{"message":"wrong"}}}',
+    1,
+  ],
+  [
+    'errors with canonical data',
+    200,
+    '{"data":{"infrastructureProbe":{"message":"Infrastructure probe ready."}},"errors":[]}',
+    1,
+  ],
+  ['invalid JSON', 200, 'invalid', 1],
+  ['HTTP error', 503, '{}', 1],
+  ['redirect', 302, '{}', 1],
+] as const)(
+  'checks health plus GraphQL: %s',
+  async (_name, status, body, exitCode) => {
+    const url = await serve((request, response) => {
+      if (request.url === '/health') {
+        response.writeHead(200);
+        response.end(JSON.stringify({ status: 'ok', commit: expectedCommit }));
+      } else {
+        expect(request.method).toBe('POST');
+        response.writeHead(status);
+        response.end(body);
+      }
+    });
+    expect((await verify(url, true)).exitCode).toBe(exitCode);
+  },
+);

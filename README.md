@@ -10,7 +10,7 @@ The agreed [backend architecture and stack](backend/backend.md) use TypeScript, 
 
 Initial authentication uses Better Auth with its OAuth Provider and JWT plugins in an isolated identity-provider module. The client-agnostic API uses `@nestjs/authentication` to validate bearer access tokens, with application-owned user IDs and permissions independent of the provider. The initial account flows are for early development only; see [the authentication decision](docs/adr/0008-operate-authentication-in-an-isolated-oidc-module.md).
 
-The architecture above records the agreed stack. GraphQL and authentication are not implemented in the health-only application. The local PostgreSQL/Prisma persistence foundation is described in [the persistence guide](docs/persistence.md). GitHub Actions verifies and releases the health-only production image to the shared development Cloud Run service. See the [Google Cloud operating guide](docs/operations/google-cloud.md) for bootstrap, billing controls, deployment inspection, retention, and recovery. Account-specific deployment evidence is recorded in GitHub Issues.
+The architecture above records the agreed stack. The public schema-first `POST /graphql` infrastructure probe reads PostgreSQL through a resolver, application service and Prisma persistence provider. Authentication is not implemented. The local PostgreSQL/Prisma persistence foundation is described in [the persistence guide](docs/persistence.md). GitHub Actions verifies and releases the production image with health and GraphQL deployment checks to the shared development Cloud Run service. See the [Google Cloud operating guide](docs/operations/google-cloud.md) for bootstrap, billing controls, deployment inspection, retention, and recovery. Account-specific deployment evidence is recorded in GitHub Issues.
 
 ## Backend development
 
@@ -63,7 +63,7 @@ The startup scripts load the optional, gitignored `backend/.env` using Node's na
 | `PORT`       | `3000`        | Decimal integer from `1` to `65535`                                          |
 | `COMMIT_SHA` | `local`       | Full 40-character lowercase Git SHA; `local` allowed only outside production |
 
-Empty or invalid settings fail at startup with the setting's name. `COMMIT_SHA` is required in production; the application does not invoke Git or contact a service to discover it. Configuration is typed and validated before listening. The health-only application consumes no database settings. Local database tools use separate connections documented in [the persistence guide](docs/persistence.md).
+Empty or invalid settings fail at startup with the setting's name. `COMMIT_SHA` is required in production; the application does not invoke Git or contact a service to discover it. Configuration is typed and validated before listening. The probe consumes the SELECT-only `DATABASE_URL`; startup and `/health` remain independent of the database. Local database tools use separate connections documented in [the persistence guide](docs/persistence.md).
 
 To verify the compiled application locally with a source SHA:
 
@@ -106,3 +106,18 @@ AI agents write all application code. An engineer is expected to understand and 
 Repository documentation explains the project as it exists. Use this README for the current overview and, once available, setup and run instructions. Keep agreed domain terms in [GLOSSARY.md](GLOSSARY.md), consequential decisions in [`docs/adr/`](docs/adr/), and add architecture or feature explanations under `docs/` or next to related code as they become useful.
 
 Track proposed work, future ideas, and roadmap items in [GitHub Issues](https://github.com/zrm20/tour-itinerary/issues). The project currently uses Issues without a separate Projects board or milestones. See [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) for the workflow.
+
+### GraphQL infrastructure probe
+
+After local migration and explicit seeding, run:
+
+```sh
+curl -sS http://localhost:3000/graphql -H 'content-type: application/json' \
+  --data '{"query":"{ infrastructureProbe { message } }"}'
+```
+
+Success returns `{"data":{"infrastructureProbe":{"message":"Infrastructure probe ready."}}}`. Missing fixture or database/query failure returns HTTP 200 with a null probe, `Infrastructure probe unavailable.` and code `INFRASTRUCTURE_PROBE_FAILED`. Malformed requests use GraphQL transport error status codes. Diagnostic details and stack traces are excluded from public errors; server diagnostics use fixed categories.
+
+`npm run generate` generates Prisma client and TypeScript resolver types from the committed schema and `codegen.ts`, using locked tools without a database or deployment secrets. Dev, check, test, typecheck and build workflows generate automatically; generated output is ignored. Nest copies `.graphql` assets into `dist`, alongside the compiled Prisma client, for production.
+
+Retain this probe until a deployed domain operation has equivalent database integration tests and deployment checks. Its removal belongs to that feature's acceptance criteria; independent `/health` remains.

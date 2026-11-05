@@ -1,0 +1,7 @@
+type Query {
+  infrastructureProbe: InfrastructureProbe
+}
+
+type InfrastructureProbe {
+  message: String!
+}

@@ -1,0 +1,262 @@
+name: Codex issue implementation
+on:
+  issues:
+    types: [closed, reopened, labeled]
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to start or retry
+        type: string
+        required: true
+      retry:
+        description: Explicitly retry a previous or abandoned implementation
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: codex-issue-implementation
+  queue: max
+  cancel-in-progress: false
+jobs:
+  claim:
+    if: >-
+      vars.CODEX_ISSUES_ENABLED == 'true' && github.ref == 'refs/heads/main' &&
+      (github.event_name != 'issues' || github.event.action != 'labeled' ||
+       github.event.label.name == 'ready-for-agent')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    outputs:
+      claimed: ${{ steps.claim.outputs.claimed }}
+      claim: ${{ steps.claim.outputs.claim }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.2
+      - name: Claim the oldest eligible issue, or the manually selected issue
+        id: claim
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_KEY_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          RETRY: ${{ inputs.retry }}
+        run: node scripts/agents/run.mjs claim
+
+  preflight:
+    needs: claim
+    if: needs.claim.outputs.claimed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      safe: ${{ steps.guard.outputs.safe }}
+      reason: ${{ steps.guard.outputs.reason }}
+      sha: ${{ steps.guard.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.2
+      - id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAIM: ${{ needs.claim.outputs.claim }}
+        run: node scripts/agents/run.mjs guard
+
+  implement:
+    needs: [claim, preflight]
+    if: needs.preflight.outputs.safe == 'true'
+    runs-on: ubuntu-24.04
+    # The agent has 60 minutes; setup and artifact preservation have separate headroom.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      artifact_id: ${{ steps.preserve.outputs.artifact-id }}
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_USER: it_admin
+          POSTGRES_PASSWORD: local-admin
+          POSTGRES_DB: it_admin
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U it_admin -d it_admin"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          path: work
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.2
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.1
+      - name: Prepare the fixed prompt and implementation branch
+        env:
+          CLAIM: ${{ needs.claim.outputs.claim }}
+          OUTPUT_DIR: ${{ runner.temp }}/agent-result
+          CODEX_CONFIG_DIR: ${{ runner.temp }}/codex-home
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const claim = JSON.parse(process.env.CLAIM);
+          mkdirSync(process.env.OUTPUT_DIR, { recursive: true });
+          mkdirSync(process.env.CODEX_CONFIG_DIR, { recursive: true });
+          writeFileSync(process.env.CODEX_CONFIG_DIR + '/config.toml', '[sandbox_workspace_write]\nnetwork_access = true\n');
+          const prompt = readFileSync('control/.github/codex/implement.md', 'utf8').replace('<issue_url>', claim.issueUrl);
+          writeFileSync(process.env.OUTPUT_DIR + '/prompt.md', prompt);
+          execFileSync('git', ['switch', '-c', claim.branch], { cwd: 'work', stdio: 'inherit' });
+          execFileSync('git', ['config', 'user.name', 'github-actions[bot]'], { cwd: 'work' });
+          execFileSync('git', ['config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], { cwd: 'work' });
+          JS
+      - name: Install locked backend dependencies
+        working-directory: work/backend
+        run: npm ci
+      - name: Prepare isolated PostgreSQL roles
+        env:
+          PGPASSWORD: local-admin
+        run: |
+          psql -h 127.0.0.1 -U it_admin -d it_admin -v ON_ERROR_STOP=1 -f work/backend/database/roles.sql
+          psql -h 127.0.0.1 -U it_admin -d it_admin -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER ROLE it_migration PASSWORD 'local-migration';
+          ALTER ROLE it_runtime PASSWORD 'local-runtime';
+          SQL
+      - name: Run the implement skill
+        timeout-minutes: 60
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMPLEMENTATION_BRANCH: ${{ fromJSON(needs.claim.outputs.claim).branch }}
+          TEST_ADMIN_DATABASE_URL: postgresql://it_admin:local-admin@127.0.0.1:5432/it_admin
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          working-directory: ${{ github.workspace }}/work
+          prompt-file: ${{ runner.temp }}/agent-result/prompt.md
+          output-file: ${{ runner.temp }}/agent-result/report.json
+          output-schema-file: ${{ github.workspace }}/control/.github/codex/report.schema.json
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+          codex-home: ${{ runner.temp }}/codex-home
+          # Any actor can cause a scan; only maintainer-labeled eligible issues can reach this job.
+          allow-users: "*"
+          allow-bots: true
+      - name: Preserve the patch and validate the completion report
+        if: always()
+        env:
+          BASE_SHA: ${{ needs.preflight.outputs.sha }}
+          OUTPUT_DIR: ${{ runner.temp }}/agent-result
+        run: node control/scripts/agents/capture.mjs work
+      - name: Preserve available work, including on failure
+        id: preserve
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: codex-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-result/
+          if-no-files-found: warn
+          retention-days: 14
+
+  verify:
+    needs: [claim, preflight, implement]
+    uses: ./.github/workflows/ci.yml
+    with:
+      source_sha: ${{ needs.preflight.outputs.sha }}
+      patch_artifact_id: ${{ needs.implement.outputs.artifact_id }}
+    permissions:
+      contents: read
+
+  publish:
+    needs: [claim, preflight, implement, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: read
+      pull-requests: write
+      statuses: write
+    outputs:
+      outcome: ${{ steps.publish.outputs.outcome }}
+      message: ${{ steps.publish.outputs.message }}
+      pr_url: ${{ steps.publish.outputs.pr_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          path: work
+          ref: ${{ needs.preflight.outputs.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.2
+      - uses: actions/download-artifact@v7
+        with:
+          artifact-ids: ${{ needs.implement.outputs.artifact_id }}
+          merge-multiple: true
+          path: candidate
+      - name: Recheck issue and publish the verified implementation
+        id: publish
+        working-directory: work
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAIM: ${{ needs.claim.outputs.claim }}
+          PATCH_PATH: ${{ github.workspace }}/candidate/implementation.patch
+          REPORT_PATH: ${{ github.workspace }}/candidate/report.json
+          PATCH_DIGEST: ${{ needs.verify.outputs.patch_digest }}
+        run: node ../control/scripts/agents/run.mjs publish
+
+  finish:
+    needs: [claim, preflight, implement, verify, publish]
+    if: always() && needs.claim.outputs.claimed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.2
+      - name: Report success, failure, or held work on the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAIM: ${{ needs.claim.outputs.claim }}
+          PREFLIGHT_SAFE: ${{ needs.preflight.outputs.safe }}
+          PREFLIGHT_REASON: ${{ needs.preflight.outputs.reason }}
+          PUBLISH_OUTCOME: ${{ needs.publish.outputs.outcome }}
+          PUBLISH_MESSAGE: ${{ needs.publish.outputs.message }}
+          PR_URL: ${{ needs.publish.outputs.pr_url }}
+          CLAIM_RESULT: ${{ needs.claim.result }}
+        run: node scripts/agents/run.mjs finish

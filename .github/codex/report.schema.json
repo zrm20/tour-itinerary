@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "summary",
+    "checks",
+    "review_complete",
+    "unresolved_findings"
+  ],
+  "properties": {
+    "status": { "type": "string", "enum": ["complete", "failed", "blocked"] },
+    "summary": { "type": "string" },
+    "review_complete": { "type": "boolean" },
+    "unresolved_findings": { "type": "integer" },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "passed"],
+        "properties": {
+          "command": { "type": "string" },
+          "passed": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

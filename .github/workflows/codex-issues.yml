@@ -35,6 +35,8 @@ jobs:
     outputs:
       claimed: ${{ steps.claim.outputs.claimed }}
       claim: ${{ steps.claim.outputs.claim }}
+      ready: ${{ steps.claim.outputs.ready }}
+      sha: ${{ steps.claim.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -42,53 +44,27 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24.22.2
-      - name: Claim the oldest eligible issue, or the manually selected issue
+      - name: Claim one eligible issue and resolve its latest base
         id: claim
         env:
           GH_TOKEN: ${{ github.token }}
           OPENAI_KEY_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           RETRY: ${{ inputs.retry }}
-        run: node scripts/agents/run.mjs claim
-
-  preflight:
-    needs: claim
-    if: needs.claim.outputs.claimed == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: read
-      pull-requests: read
-    outputs:
-      safe: ${{ steps.guard.outputs.safe }}
-      reason: ${{ steps.guard.outputs.reason }}
-      sha: ${{ steps.guard.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24.22.2
-      - id: guard
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLAIM: ${{ needs.claim.outputs.claim }}
-        run: node scripts/agents/run.mjs guard
+        run: node scripts/agents/gate.mjs claim
 
   implement:
-    needs: [claim, preflight]
-    if: needs.preflight.outputs.safe == 'true'
+    needs: claim
+    if: needs.claim.outputs.ready == 'true'
     runs-on: ubuntu-24.04
-    # The agent has 60 minutes; setup and artifact preservation have separate headroom.
     timeout-minutes: 75
     permissions:
-      contents: read
-      issues: read
-      pull-requests: read
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
     outputs:
-      artifact_id: ${{ steps.preserve.outputs.artifact-id }}
+      agent_outcome: ${{ steps.codex.outcome }}
     services:
       postgres:
         image: postgres:17.6-bookworm
@@ -105,40 +81,38 @@ jobs:
         with:
           path: control
           persist-credentials: false
-      - uses: actions/checkout@v6
-        with:
-          path: work
-          ref: ${{ needs.preflight.outputs.sha }}
-          fetch-depth: 0
-          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: 24.22.2
-      - uses: hashicorp/setup-terraform@v4
+      - uses: actions/checkout@v6
         with:
-          terraform_version: 1.17.1
-      - name: Prepare the fixed prompt and implementation branch
+          path: work
+          ref: ${{ needs.claim.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare the fixed prompt, Git credentials, and GitHub MCP
         env:
+          GH_TOKEN: ${{ github.token }}
           CLAIM: ${{ needs.claim.outputs.claim }}
-          OUTPUT_DIR: ${{ runner.temp }}/agent-result
-          CODEX_CONFIG_DIR: ${{ runner.temp }}/codex-home
         run: |
+          gh auth setup-git
+          git -C work config user.name 'github-actions[bot]'
+          git -C work config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          mkdir -p "$RUNNER_TEMP/codex-home" "$RUNNER_TEMP/codex-result"
+          cp control/.github/codex/config.toml "$RUNNER_TEMP/codex-home/config.toml"
           node --input-type=module <<'JS'
-          import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-          import { execFileSync } from 'node:child_process';
+          import { readFileSync, writeFileSync } from 'node:fs';
           const claim = JSON.parse(process.env.CLAIM);
-          mkdirSync(process.env.OUTPUT_DIR, { recursive: true });
-          mkdirSync(process.env.CODEX_CONFIG_DIR, { recursive: true });
-          writeFileSync(process.env.CODEX_CONFIG_DIR + '/config.toml', '[sandbox_workspace_write]\nnetwork_access = true\n');
+          writeFileSync(process.env.RUNNER_TEMP + '/codex-result/claim.json', JSON.stringify(claim, null, 2));
           const prompt = readFileSync('control/.github/codex/implement.md', 'utf8').replace('<issue_url>', claim.issueUrl);
-          writeFileSync(process.env.OUTPUT_DIR + '/prompt.md', prompt);
-          execFileSync('git', ['switch', '-c', claim.branch], { cwd: 'work', stdio: 'inherit' });
-          execFileSync('git', ['config', 'user.name', 'github-actions[bot]'], { cwd: 'work' });
-          execFileSync('git', ['config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], { cwd: 'work' });
+          writeFileSync(process.env.RUNNER_TEMP + '/codex-result/prompt.md', prompt);
           JS
       - name: Install locked backend dependencies
         working-directory: work/backend
         run: npm ci
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.17.1
       - name: Prepare isolated PostgreSQL roles
         env:
           PGPASSWORD: local-admin
@@ -148,93 +122,47 @@ jobs:
           ALTER ROLE it_migration PASSWORD 'local-migration';
           ALTER ROLE it_runtime PASSWORD 'local-runtime';
           SQL
-      - name: Run the implement skill
+      - name: Implement the issue and open its PR through GitHub MCP
+        id: codex
         timeout-minutes: 60
         uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # v1
         env:
           GH_TOKEN: ${{ github.token }}
-          IMPLEMENTATION_BRANCH: ${{ fromJSON(needs.claim.outputs.claim).branch }}
+          CLAIM: ${{ needs.claim.outputs.claim }}
+          CLAIM_FILE: ${{ runner.temp }}/codex-result/claim.json
+          GATE_SCRIPT: ${{ github.workspace }}/control/scripts/agents/gate.mjs
           TEST_ADMIN_DATABASE_URL: postgresql://it_admin:local-admin@127.0.0.1:5432/it_admin
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           working-directory: ${{ github.workspace }}/work
-          prompt-file: ${{ runner.temp }}/agent-result/prompt.md
-          output-file: ${{ runner.temp }}/agent-result/report.json
-          output-schema-file: ${{ github.workspace }}/control/.github/codex/report.schema.json
-          sandbox: workspace-write
-          safety-strategy: drop-sudo
+          prompt-file: ${{ runner.temp }}/codex-result/prompt.md
+          output-file: ${{ runner.temp }}/codex-result/summary.md
           codex-home: ${{ runner.temp }}/codex-home
-          # Any actor can cause a scan; only maintainer-labeled eligible issues can reach this job.
+          # This disposable hosted runner permits Git writes, MCP, and local test servers.
+          sandbox: danger-full-access
+          safety-strategy: drop-sudo
+          # Any actor may trigger a scan; readiness and ownership are checked before launch.
           allow-users: "*"
           allow-bots: true
-      - name: Preserve the patch and validate the completion report
+      - name: Preserve available local work after the agent exits
         if: always()
         env:
-          BASE_SHA: ${{ needs.preflight.outputs.sha }}
-          OUTPUT_DIR: ${{ runner.temp }}/agent-result
-        run: node control/scripts/agents/capture.mjs work
-      - name: Preserve available work, including on failure
-        id: preserve
+          BASE_SHA: ${{ needs.claim.outputs.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/codex-result"
+          git -C work bundle create "$RUNNER_TEMP/codex-result/work.bundle" --all
+          git -C work diff --binary "$BASE_SHA" > "$RUNNER_TEMP/codex-result/working.patch"
+          git -C work ls-files --others --exclude-standard -z | tar -C work --null -T - -czf "$RUNNER_TEMP/codex-result/untracked.tar.gz"
+      - uses: actions/upload-artifact@v6
         if: always()
-        uses: actions/upload-artifact@v6
         with:
           name: codex-result-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/agent-result/
+          path: ${{ runner.temp }}/codex-result/
           if-no-files-found: warn
           retention-days: 14
 
-  verify:
-    needs: [claim, preflight, implement]
-    uses: ./.github/workflows/ci.yml
-    with:
-      source_sha: ${{ needs.preflight.outputs.sha }}
-      patch_artifact_id: ${{ needs.implement.outputs.artifact_id }}
-    permissions:
-      contents: read
-
-  publish:
-    needs: [claim, preflight, implement, verify]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      issues: read
-      pull-requests: write
-      statuses: write
-    outputs:
-      outcome: ${{ steps.publish.outputs.outcome }}
-      message: ${{ steps.publish.outputs.message }}
-      pr_url: ${{ steps.publish.outputs.pr_url }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          path: control
-          persist-credentials: false
-      - uses: actions/checkout@v6
-        with:
-          path: work
-          ref: ${{ needs.preflight.outputs.sha }}
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24.22.2
-      - uses: actions/download-artifact@v7
-        with:
-          artifact-ids: ${{ needs.implement.outputs.artifact_id }}
-          merge-multiple: true
-          path: candidate
-      - name: Recheck issue and publish the verified implementation
-        id: publish
-        working-directory: work
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLAIM: ${{ needs.claim.outputs.claim }}
-          PATCH_PATH: ${{ github.workspace }}/candidate/implementation.patch
-          REPORT_PATH: ${{ github.workspace }}/candidate/report.json
-          PATCH_DIGEST: ${{ needs.verify.outputs.patch_digest }}
-        run: node ../control/scripts/agents/run.mjs publish
-
-  finish:
-    needs: [claim, preflight, implement, verify, publish]
+  recover:
+    needs: [claim, implement]
     if: always() && needs.claim.outputs.claimed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -249,14 +177,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24.22.2
-      - name: Report success, failure, or held work on the issue
+      - name: Report interrupted, held, or incomplete attempts
         env:
           GH_TOKEN: ${{ github.token }}
           CLAIM: ${{ needs.claim.outputs.claim }}
-          PREFLIGHT_SAFE: ${{ needs.preflight.outputs.safe }}
-          PREFLIGHT_REASON: ${{ needs.preflight.outputs.reason }}
-          PUBLISH_OUTCOME: ${{ needs.publish.outputs.outcome }}
-          PUBLISH_MESSAGE: ${{ needs.publish.outputs.message }}
-          PR_URL: ${{ needs.publish.outputs.pr_url }}
-          CLAIM_RESULT: ${{ needs.claim.result }}
-        run: node scripts/agents/run.mjs finish
+          AGENT_OUTCOME: ${{ needs.claim.result != 'success' && 'setup-failure' || needs.implement.outputs.agent_outcome }}
+        run: node scripts/agents/gate.mjs recover

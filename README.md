@@ -101,7 +101,7 @@ docker rm --force tour-itinerary-api-check
 
 AI agents write all application code. An engineer is expected to understand and review every change before it is merged. Agents are held to professional engineering standards, run relevant project checks, and add or update tests when a change calls for them. Task-specific issues can set how much implementation freedom an agent has.
 
-The opt-in [Codex issue implementation workflow](docs/operations/codex-issues.md) claims unassigned, unblocked `ready-for-agent` issues, runs the installed implementation skill, and opens verified PRs for review. Its operating guide covers activation, API authentication, branch overrides, and explicit retries.
+The opt-in [Codex issue implementation workflow](docs/operations/codex-issues.md) claims unassigned, unblocked `ready-for-agent` issues, runs the installed implementation skill, and lets the agent use GitHub MCP to open PRs for review. Its operating guide covers activation, API authentication, branch overrides, and explicit retries.
 
 ## Documentation and planning
 

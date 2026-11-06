@@ -57,11 +57,14 @@ Run these commands from `backend/`:
 
 The startup scripts load the optional, gitignored `backend/.env` using Node's native environment-file support. Existing environment variables take precedence. [`.env.example`](backend/.env.example) documents the settings without secrets. Tests isolate their settings and do not load this file.
 
-| Variable     | Local default | Validation                                                                   |
-| ------------ | ------------- | ---------------------------------------------------------------------------- |
-| `NODE_ENV`   | `development` | `development`, `test`, or `production`                                       |
-| `PORT`       | `3000`        | Decimal integer from `1` to `65535`                                          |
-| `COMMIT_SHA` | `local`       | Full 40-character lowercase Git SHA; `local` allowed only outside production |
+| Variable             | Local default | Validation                                                                   |
+| -------------------- | ------------- | ---------------------------------------------------------------------------- |
+| `NODE_ENV`           | `development` | `development`, `test`, or `production`                                       |
+| `PORT`               | `3000`        | Decimal integer from `1` to `65535`                                          |
+| `COMMIT_SHA`         | `local`       | Full 40-character lowercase Git SHA; `local` allowed only outside production |
+| `GRAPHQL_PLAYGROUND` | `false`       | Exactly `true` or `false`; enables the browser query editor at `/graphql`    |
+
+Set `GRAPHQL_PLAYGROUND=true` in `backend/.env` to enable the browser query editor, then restart the development server. It defaults to disabled in every environment and can be enabled explicitly in shared development through its environment configuration.
 
 Empty or invalid settings fail at startup with the setting's name. `COMMIT_SHA` is required in production; the application does not invoke Git or contact a service to discover it. Configuration is typed and validated before listening. The probe consumes the SELECT-only `DATABASE_URL`; startup and `/health` remain independent of the database. Local database tools use separate connections documented in [the persistence guide](docs/persistence.md).
 

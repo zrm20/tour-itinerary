@@ -6,28 +6,34 @@ import { ProbeService } from './probe/probe.service';
 import { ProbeResolver } from './probe/probe.resolver';
 import { Module } from '@nestjs/common';
 import { AppConfig } from './app-config';
+import { AppConfigModule } from './app-config.module';
 import { HealthController } from './health.controller';
 
 @Module({
   imports: [
-    GraphQLModule.forRoot<ApolloDriverConfig>({
+    AppConfigModule,
+    GraphQLModule.forRootAsync<ApolloDriverConfig>({
       driver: ApolloDriver,
-      typePaths: [join(__dirname, '**/*.graphql')],
-      playground: false,
-      includeStacktraceInErrorResponses: false,
-      formatError: (error) => ({
-        message:
-          error.extensions?.code === 'INFRASTRUCTURE_PROBE_FAILED'
-            ? 'Infrastructure probe unavailable.'
-            : 'GraphQL request failed.',
-        ...(error.locations ? { locations: error.locations } : {}),
-        ...(error.path ? { path: error.path } : {}),
-        extensions: {
-          code:
+      imports: [AppConfigModule],
+      inject: [AppConfig],
+      useFactory: (config: AppConfig) => ({
+        typePaths: [join(__dirname, '**/*.graphql')],
+        playground: config.graphqlPlayground,
+        includeStacktraceInErrorResponses: false,
+        formatError: (error) => ({
+          message:
             error.extensions?.code === 'INFRASTRUCTURE_PROBE_FAILED'
-              ? 'INFRASTRUCTURE_PROBE_FAILED'
-              : 'GRAPHQL_REQUEST_FAILED',
-        },
+              ? 'Infrastructure probe unavailable.'
+              : 'GraphQL request failed.',
+          ...(error.locations ? { locations: error.locations } : {}),
+          ...(error.path ? { path: error.path } : {}),
+          extensions: {
+            code:
+              error.extensions?.code === 'INFRASTRUCTURE_PROBE_FAILED'
+                ? 'INFRASTRUCTURE_PROBE_FAILED'
+                : 'GRAPHQL_REQUEST_FAILED',
+          },
+        }),
       }),
     }),
   ],
@@ -39,7 +45,6 @@ import { HealthController } from './health.controller';
       provide: FixturePersistence,
       useFactory: () => new FixturePersistence(process.env.DATABASE_URL),
     },
-    { provide: AppConfig, useFactory: () => new AppConfig(process.env) },
   ],
 })
 export class AppModule {}

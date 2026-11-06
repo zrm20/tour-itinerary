@@ -8,11 +8,25 @@ beforeEach(() => {
   vi.stubEnv('PORT', undefined);
   vi.stubEnv('COMMIT_SHA', undefined);
   vi.stubEnv('DATABASE_URL', undefined);
+  vi.stubEnv('GRAPHQL_PLAYGROUND', undefined);
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
+
+it.each(['', 'TRUE', '1', 'yes', ' false '])(
+  'rejects invalid GRAPHQL_PLAYGROUND %j at startup',
+  async (playground) => {
+    vi.stubEnv('GRAPHQL_PLAYGROUND', playground);
+
+    await expect(
+      Test.createTestingModule({ imports: [AppModule] })
+        .compile()
+        .then((module) => module.close()),
+    ).rejects.toThrow('GRAPHQL_PLAYGROUND must be true or false');
+  },
+);
 
 it.each(['not-a-port', '', '0', '65536', '-1', '3000.5', '1e3', ' 3000 '])(
   'rejects invalid PORT %j at startup with a clear setting name',

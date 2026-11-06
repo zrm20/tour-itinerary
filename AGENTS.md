@@ -16,6 +16,7 @@ Domain docs use the single-context layout. See `docs/agents/domain.md`.
 
 ## Project operating model
 
+- When implementing or reviewing code changes, read and follow [coding conventions](docs/coding-conventions.md).
 - AI agents write all application code. Every agent-authored change must be reviewed by an engineer before it is merged.
 - Hold agent-authored work to professional engineering standards. Follow established architecture, coding conventions, and patterns; keep changes understandable and reviewable.
 - Run the relevant project checks and add or update tests when a change calls for them before requesting review.

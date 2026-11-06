@@ -10,7 +10,7 @@ The agreed [backend architecture and stack](backend/backend.md) use TypeScript, 
 
 Initial authentication uses Better Auth with its OAuth Provider and JWT plugins in an isolated identity-provider module. The client-agnostic API uses `@nestjs/authentication` to validate bearer access tokens, with application-owned user IDs and permissions independent of the provider. The initial account flows are for early development only; see [the authentication decision](docs/adr/0008-operate-authentication-in-an-isolated-oidc-module.md).
 
-The architecture above records the agreed stack. The public schema-first `POST /graphql` infrastructure probe reads PostgreSQL through a resolver, application service and Prisma persistence provider. Authentication is not implemented. The local PostgreSQL/Prisma persistence foundation is described in [the persistence guide](docs/persistence.md). GitHub Actions verifies and releases the production image with health and GraphQL deployment checks to the shared development Cloud Run service. See the [Google Cloud operating guide](docs/operations/google-cloud.md) for bootstrap, billing controls, deployment inspection, retention, and recovery. Account-specific deployment evidence is recorded in GitHub Issues.
+The architecture above records the agreed stack. The public schema-first `POST /graphql` infrastructure probe reads PostgreSQL through a resolver, application service and Prisma persistence provider. Development registration, OIDC sign-in and bearer-protected `currentUser` are implemented; see the [authentication setup and CLI guide](docs/authentication.md). The local PostgreSQL/Prisma persistence foundation is described in [the persistence guide](docs/persistence.md). GitHub Actions verifies and releases the production image with health and GraphQL deployment checks to the shared development Cloud Run service. See the [Google Cloud operating guide](docs/operations/google-cloud.md) for bootstrap, billing controls, deployment inspection, retention, and recovery. Account-specific deployment evidence is recorded in GitHub Issues.
 
 ## Backend development
 
@@ -28,7 +28,7 @@ cp .env.example .env
 npm run start:dev
 ```
 
-The API runs natively in watch mode and binds to `0.0.0.0` on the configured `PORT` (default `3000`). Source edits rebuild and restart it. Restart the command after editing `.env`. No Docker, database, cloud account, or secrets are needed.
+The API runs natively in watch mode and binds to `0.0.0.0` on the configured `PORT` (default `3000`). Source edits rebuild and restart it. Restart the command after editing `.env`. With `AUTH_ISSUER` unset, no Docker, database, cloud account, or secrets are needed for startup and health. See [development authentication](docs/authentication.md) to enable registration and OIDC.
 
 In another terminal:
 
@@ -66,7 +66,7 @@ The startup scripts load the optional, gitignored `backend/.env` using Node's na
 
 Set `GRAPHQL_PLAYGROUND=true` in `backend/.env` to enable the browser query editor, then restart the development server. It defaults to disabled in every environment and can be enabled explicitly in shared development through its environment configuration.
 
-Empty or invalid settings fail at startup with the setting's name. `COMMIT_SHA` is required in production; the application does not invoke Git or contact a service to discover it. Configuration is typed and validated before listening. The probe consumes the SELECT-only `DATABASE_URL`; startup and `/health` remain independent of the database. Local database tools use separate connections documented in [the persistence guide](docs/persistence.md).
+Empty or invalid settings fail at startup with the setting's name. `COMMIT_SHA` is required in production; the application does not invoke Git or contact a service to discover it. Configuration is typed and validated before listening. The runtime consumes the restricted `DATABASE_URL` (application/auth CRUD and fixture SELECT); startup and `/health` remain independent of the database. Local database tools use separate connections documented in [the persistence guide](docs/persistence.md).
 
 To verify the compiled application locally with a source SHA:
 

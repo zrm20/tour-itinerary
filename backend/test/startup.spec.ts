@@ -66,3 +66,17 @@ it.each(['', 'prod'])('rejects an unknown NODE_ENV %j', async (nodeEnv) => {
       .then((module) => module.close()),
   ).rejects.toThrow('NODE_ENV must be development, test, or production');
 });
+
+it.each(['', '0', '-1', '1.5', '1e3', ' 1800 ', '86401', 'invalid'])(
+  'rejects invalid ACCESS_TOKEN_TTL_SECONDS %j',
+  async (value) => {
+    vi.stubEnv('ACCESS_TOKEN_TTL_SECONDS', value);
+    await expect(
+      Test.createTestingModule({ imports: [AppModule] })
+        .compile()
+        .then((module) => module.close()),
+    ).rejects.toThrow(
+      'ACCESS_TOKEN_TTL_SECONDS must be an integer from 1 to 86400',
+    );
+  },
+);

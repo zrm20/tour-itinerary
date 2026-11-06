@@ -52,6 +52,29 @@ resource "google_cloud_run_service" "api" {
             }
           }
         }
+        dynamic "env" {
+          for_each = var.enable_authentication ? {
+            AUTH_ISSUER              = var.auth_issuer
+            API_AUDIENCE             = var.api_audience
+            ACCESS_TOKEN_TTL_SECONDS = tostring(var.access_token_ttl_seconds)
+          } : {}
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+        dynamic "env" {
+          for_each = var.enable_authentication ? [1] : []
+          content {
+            name = "AUTH_SECRET"
+            value_from {
+              secret_key_ref {
+                name = google_secret_manager_secret.auth.secret_id
+                key  = var.auth_secret_version
+              }
+            }
+          }
+        }
         ports { container_port = 8080 }
         resources { limits = { cpu = "1", memory = "512Mi" } }
         startup_probe {
@@ -97,7 +120,7 @@ resource "google_cloud_run_service" "api" {
       traffic,
     ]
   }
-  depends_on = [google_project_service.api, google_secret_manager_secret_iam_member.runtime_database]
+  depends_on = [google_project_service.api, google_secret_manager_secret_iam_member.runtime_database, google_secret_manager_secret_iam_member.auth]
 }
 resource "google_cloud_run_service_iam_member" "public" {
   count    = var.enable_service ? 1 : 0

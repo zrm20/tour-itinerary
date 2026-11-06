@@ -505,3 +505,15 @@ test('database failures are bounded and sanitized while health stays independent
       .data?.currentUser,
   ).toBeTruthy();
 });
+
+test('OIDC discovery publishes the configured issuer and real protocol endpoints', async () => {
+  const response = await fetch(`${issuer}/.well-known/openid-configuration`);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    issuer,
+    authorization_endpoint: `${issuer}/oauth2/authorize`,
+    token_endpoint: `${issuer}/oauth2/token`,
+    jwks_uri: `${issuer}/jwks`,
+    code_challenge_methods_supported: ['S256'],
+  });
+});

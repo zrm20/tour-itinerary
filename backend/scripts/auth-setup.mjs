@@ -1,10 +1,12 @@
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
+import { generateKeyPair, exportJWK } from 'jose';
+import { symmetricEncrypt } from 'better-auth/crypto';
 
 /** Explicit, idempotent setup; never called by startup or ordinary reads. */
 export async function provisionOidc(
   connectionString,
-  { audience, clientId, callback, lifetime = 1800 },
+  { audience, clientId, callback, lifetime = 1800, secret },
 ) {
   const redirect = new URL(callback);
   if (
@@ -32,11 +34,37 @@ export async function provisionOidc(
   await client.connect();
   try {
     await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(3737)');
+    if (secret !== undefined) {
+      if (secret.length < 32)
+        throw new Error('AUTH_SECRET must contain at least 32 characters');
+      const existing = await client.query(
+        'SELECT id FROM auth_jwks WHERE alg = $1 AND ("expiresAt" IS NULL OR "expiresAt" > now()) LIMIT 1',
+        ['RS256'],
+      );
+      if (!existing.rowCount) {
+        const keys = await generateKeyPair('RS256', { extractable: true });
+        await client.query(
+          'INSERT INTO auth_jwks (id, "publicKey", "privateKey", "createdAt", alg) VALUES ($1,$2,$3,now(),$4)',
+          [
+            randomUUID(),
+            JSON.stringify(await exportJWK(keys.publicKey)),
+            JSON.stringify(
+              await symmetricEncrypt({
+                key: secret,
+                data: JSON.stringify(await exportJWK(keys.privateKey)),
+              }),
+            ),
+            'RS256',
+          ],
+        );
+      }
+    }
     await client.query(
       `INSERT INTO "auth_oauthResource" (id, identifier, name, "accessTokenTtl", "allowedScopes", "signingAlgorithm", "createdAt", "updatedAt")
-      VALUES ($1, $2, 'Tour Itinerary API', $3, ARRAY['openid','profile','email'], 'RS256', now(), now())
-      ON CONFLICT (identifier) DO UPDATE SET "accessTokenTtl" = EXCLUDED."accessTokenTtl", "signingAlgorithm" = 'RS256', "allowedScopes" = EXCLUDED."allowedScopes", "updatedAt" = now()`,
-      [randomUUID(), audience, lifetime],
+      VALUES ($1, $2, 'Tour Itinerary API', NULL, ARRAY['openid','profile','email'], 'RS256', now(), now())
+      ON CONFLICT (identifier) DO UPDATE SET "accessTokenTtl" = NULL, "signingAlgorithm" = 'RS256', "allowedScopes" = EXCLUDED."allowedScopes", "updatedAt" = now()`,
+      [randomUUID(), audience],
     );
     await client.query(
       `INSERT INTO "auth_oauthClient" (id, "clientId", name, "skipConsent", "requirePKCE", "tokenEndpointAuthMethod", "applicationType", scopes, "grantTypes", "responseTypes", "redirectUris", "createdAt", "updatedAt")
@@ -57,9 +85,12 @@ export async function provisionOidc(
   }
 }
 if (process.argv[1]?.endsWith('/auth-setup.mjs')) {
+  if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 32)
+    throw new Error('AUTH_SECRET must contain at least 32 characters');
   if (!process.env.MIGRATION_DATABASE_URL)
     throw new Error('Explicit MIGRATION_DATABASE_URL required');
   provisionOidc(process.env.MIGRATION_DATABASE_URL, {
+    secret: process.env.AUTH_SECRET,
     audience: process.env.API_AUDIENCE ?? 'urn:tour-itinerary:api',
     clientId: process.env.OIDC_CLIENT_ID,
     callback: process.env.OIDC_CALLBACK_URL,

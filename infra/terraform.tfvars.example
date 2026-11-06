@@ -12,3 +12,10 @@ enable_service  = false
 enable_persistence = false
 # runtime_database_secret_version = "1"
 # migration_database_secret_version = "1"
+
+# Separate engineer authentication checkpoint, after explicit OIDC setup.
+enable_authentication = false
+# auth_secret_version = "1"
+# auth_issuer = "https://STABLE_SERVICE_HOST/auth"
+# api_audience = "urn:tour-itinerary:api"
+# access_token_ttl_seconds = 1800

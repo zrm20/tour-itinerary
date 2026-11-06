@@ -7,5 +7,5 @@ type User {
   displayName: String!
 }
 extend type Query {
- currentUser: User!
+  currentUser: User!
 }

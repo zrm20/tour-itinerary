@@ -19,11 +19,13 @@ resource "google_cloud_run_service" "api" {
   }
   template {
     metadata {
-      # Delivery carries the service's provider attribution label into revisions.
+      # gcloud carries service labels into revisions; keep persistence labels managed.
       labels = {
         "source-commit"              = var.bootstrap_commit
         "release-id"                 = "bootstrap"
         "goog-terraform-provisioned" = "true"
+        "persistence-mode"           = var.enable_persistence ? "enabled" : "disabled"
+        "migration-secret-version"   = var.enable_persistence ? var.migration_database_secret_version : "disabled"
       }
       annotations = {
         "autoscaling.knative.dev/minScale"     = "0"

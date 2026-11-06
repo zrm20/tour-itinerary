@@ -34,6 +34,8 @@ run "disabled_without_secret_versions" {
     condition = (
       google_cloud_run_service.api[0].metadata[0].labels["persistence-mode"] == "disabled" &&
       google_cloud_run_service.api[0].metadata[0].labels["migration-secret-version"] == "disabled" &&
+      lookup(google_cloud_run_service.api[0].template[0].metadata[0].labels, "persistence-mode", "") == "disabled" &&
+      lookup(google_cloud_run_service.api[0].template[0].metadata[0].labels, "migration-secret-version", "") == "disabled" &&
       length(google_cloud_run_service.api[0].template[0].spec[0].containers[0].env) == 0
     )
     error_message = "Preparation must preserve health-only service without database versions or environment values."
@@ -82,6 +84,8 @@ run "activated_runtime_reference_only" {
     condition = (
       google_cloud_run_service.api[0].metadata[0].labels["persistence-mode"] == "enabled" &&
       google_cloud_run_service.api[0].metadata[0].labels["migration-secret-version"] == "7" &&
+      lookup(google_cloud_run_service.api[0].template[0].metadata[0].labels, "persistence-mode", "") == "enabled" &&
+      lookup(google_cloud_run_service.api[0].template[0].metadata[0].labels, "migration-secret-version", "") == "7" &&
       length(google_cloud_run_service.api[0].template[0].spec[0].containers[0].env) == 1 &&
       one(google_cloud_run_service.api[0].template[0].spec[0].containers[0].env).name == "DATABASE_URL" &&
       one(google_cloud_run_service.api[0].template[0].spec[0].containers[0].env).value_from[0].secret_key_ref[0].name == "api-runtime-database-url" &&
@@ -101,6 +105,7 @@ run "prepare_rotated_versions" {
   assert {
     condition = (
       google_cloud_run_service.api[0].metadata[0].labels["migration-secret-version"] == "8" &&
+      lookup(google_cloud_run_service.api[0].template[0].metadata[0].labels, "migration-secret-version", "") == "8" &&
       one(google_cloud_run_service.api[0].template[0].spec[0].containers[0].env).value_from[0].secret_key_ref[0].key == "5"
     )
     error_message = "Version rotation must remain Terraform-managed rather than ignored with release fields."

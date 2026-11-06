@@ -87,3 +87,15 @@ it('returns only status and the full source SHA in production', async () => {
     commit: '0123456789abcdef0123456789abcdef01234567',
   });
 });
+
+it('starts and serves health with authentication configured and PostgreSQL unavailable', async () => {
+  vi.stubEnv('AUTH_ISSUER', 'http://127.0.0.1:3000/auth');
+  vi.stubEnv('AUTH_SECRET', 'test-only-secret-at-least-thirty-two-characters');
+  vi.stubEnv(
+    'DATABASE_URL',
+    'postgresql://unavailable:unavailable@127.0.0.1:1/unavailable',
+  );
+  const response = await requestHealth();
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ status: 'ok', commit: 'local' });
+});

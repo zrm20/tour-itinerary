@@ -1,3 +1,4 @@
+import type { Database } from '../persistence/database';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { jwt } from 'better-auth/plugins';
@@ -6,7 +7,11 @@ import { z } from 'zod';
 import type { AuthConfig } from '../authentication/auth.config';
 import type { UsersService } from '../users/users.service';
 
-export function createProvider(config: AuthConfig, users: UsersService) {
+export function createProvider(
+  config: AuthConfig,
+  users: UsersService,
+  persistence: Database,
+) {
   const provision = async (user: {
     id: string;
     email: string;
@@ -26,20 +31,13 @@ export function createProvider(config: AuthConfig, users: UsersService) {
     baseURL: config.issuer,
     basePath: '/auth',
     secret: config.secret,
-    database: prismaAdapter(users.database, {
+    database: prismaAdapter(persistence.database, {
       provider: 'postgresql',
       transaction: true,
     }),
     trustedOrigins: [new URL(config.issuer).origin],
     logger: { disabled: true },
     onAPIError: { onError: () => undefined },
-    onResponse: async (response) =>
-      response.status >= 500
-        ? Response.json(
-            { error: 'Authentication is unavailable' },
-            { status: 503 },
-          )
-        : undefined,
     emailAndPassword: { enabled: true, requireEmailVerification: false },
     account: { accountLinking: { enabled: false } },
     user: {
@@ -67,7 +65,7 @@ export function createProvider(config: AuthConfig, users: UsersService) {
         create: {
           after: async (session) => {
             // Repair a provisioning failure before allowing another sign-in session.
-            const user = await users.database.user.findUniqueOrThrow({
+            const user = await persistence.database.user.findUniqueOrThrow({
               where: { id: session.userId },
             });
             await provision(user);
@@ -76,6 +74,19 @@ export function createProvider(config: AuthConfig, users: UsersService) {
       },
     },
     plugins: [
+      {
+        id: 'sanitize-auth-errors',
+        onResponse: (response) => {
+          if (response.status >= 500)
+            return Promise.resolve({
+              response: Response.json(
+                { error: 'Authentication is unavailable' },
+                { status: 503 },
+              ),
+            });
+          return Promise.resolve();
+        },
+      },
       jwt({ jwks: { keyPairConfig: { alg: 'RS256' } } }),
       oauthProvider({
         loginPage: '/auth/login',

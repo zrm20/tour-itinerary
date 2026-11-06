@@ -1,6 +1,7 @@
 export class AppConfig {
   readonly port: number;
   readonly commit: string;
+  readonly graphqlPlayground: boolean;
 
   constructor(env: NodeJS.ProcessEnv) {
     const nodeEnv = env.NODE_ENV ?? 'development';
@@ -9,6 +10,14 @@ export class AppConfig {
         'Invalid configuration: NODE_ENV must be development, test, or production',
       );
     }
+
+    const playground = env.GRAPHQL_PLAYGROUND ?? 'false';
+    if (!['true', 'false'].includes(playground)) {
+      throw new Error(
+        'Invalid configuration: GRAPHQL_PLAYGROUND must be true or false',
+      );
+    }
+    this.graphqlPlayground = playground === 'true';
 
     const port = env.PORT ?? '3000';
     this.port = Number(port);

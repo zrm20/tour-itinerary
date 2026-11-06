@@ -45,7 +45,35 @@ async function simulate(
           ? source
           : 'a'.repeat(40);
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ status: 'ok', commit }));
+      if (_request.url?.endsWith('/graphql')) {
+        const candidateRequest =
+          _request.url.startsWith('/candidate') ||
+          state.traffic[0]?.revisionName === candidate;
+        const failed =
+          (scenario === 'candidate-probe-fails' && candidateRequest) ||
+          (scenario === 'normal-probe-fails' &&
+            !_request.url.startsWith('/candidate') &&
+            candidateRequest) ||
+          (scenario === 'recovery-probe-fails' &&
+            !candidateRequest &&
+            'tagged' in state);
+        response.end(
+          JSON.stringify(
+            failed
+              ? {
+                  data: { infrastructureProbe: null },
+                  errors: [{ message: 'Unavailable' }],
+                }
+              : {
+                  data: {
+                    infrastructureProbe: {
+                      message: 'Infrastructure probe ready.',
+                    },
+                  },
+                },
+          ),
+        );
+      } else response.end(JSON.stringify({ status: 'ok', commit }));
     });
   });
   try {
@@ -67,7 +95,7 @@ async function simulate(
               },
       }),
     );
-    for (const name of ['gh', 'gcloud', 'npm']) {
+    for (const name of ['gh', 'gcloud', 'npm', 'docker']) {
       await copyFile(
         resolve('test/fixtures/delivery-cli.mjs'),
         join(directory, name),
@@ -449,3 +477,41 @@ it('bounds a hung migration and terminates its descendants before reporting fail
   );
   expect(processState.stdout.trim()).toMatch(/^Z|^$/); // Exited, or awaiting init's reaping.
 });
+
+it.each(['candidate-probe-fails', 'normal-probe-fails'])(
+  'preserves or restores traffic on real GraphQL verification failure: %s',
+  async (scenario) => {
+    const result = await simulate(scenario);
+    expect(result.exitCode).toBe(1);
+    expect(result.state.traffic).toEqual([
+      { revisionName: previous, percent: 100 },
+    ]);
+    expect(result.output).toContain(
+      scenario === 'candidate-probe-fails'
+        ? 'previous traffic preserved and verified'
+        : 'previous revision restored and verified',
+    );
+  },
+  90000,
+);
+it('first probe release can restore the recorded health-only image', async () => {
+  const result = await simulate('health-only', 'normal');
+  expect(result.exitCode, result.output).toBe(1);
+  expect(result.output).toContain('"supportsProbe": false');
+  expect(result.output).toContain('previous revision restored and verified');
+});
+it('reports failed recovery verification for a probe-capable captured image', async () => {
+  const result = await simulate('recovery-probe-fails', 'normal');
+  expect(result.exitCode).toBe(1);
+  expect(result.output).toContain('ROLLBACK/RECONCILIATION FAILED');
+}, 90000);
+it.each(['missing-capability', 'inconsistent-capability'])(
+  'fails before mutation when captured image capability is untrusted: %s',
+  async (scenario) => {
+    const result = await simulate(scenario);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain('Recovery');
+    expect(result.calls).not.toContain('run deploy');
+    expect(result.calls).not.toContain('update-traffic');
+  },
+);

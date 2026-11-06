@@ -31,7 +31,30 @@ const flag = (name) => args[args.indexOf(name) + 1];
 const old = 'tour-itinerary-api-old';
 const candidate = 'tour-itinerary-api-r123-1';
 
-if (basename(bin) === 'gh') {
+if (basename(bin) === 'docker') {
+  if (args[0] === 'pull') console.log('Captured immutable image available');
+  else
+    print([
+      {
+        Config: {
+          Labels: {
+            'org.opencontainers.image.revision':
+              scenario === 'inconsistent-capability'
+                ? 'c'.repeat(40)
+                : scenario === 'already-current'
+                  ? 'b'.repeat(40)
+                  : 'a'.repeat(40),
+            ...(scenario === 'missing-capability'
+              ? {}
+              : {
+                  'dev.tour-itinerary.probe':
+                    scenario === 'health-only' ? 'health-v1' : 'graphql-v1',
+                }),
+          },
+        },
+      },
+    ]);
+} else if (basename(bin) === 'gh') {
   if (args[1].includes('actions/runs')) {
     print({
       event: scenario === 'pr' ? 'pull_request' : 'push',

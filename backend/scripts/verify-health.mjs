@@ -32,6 +32,7 @@ function readArguments(argv) {
   return {
     url,
     commit,
+    probe: values.get('probe') === 'true',
     attempts: positiveInteger(values, 'attempts', defaults.attempts),
     delayMs: positiveInteger(values, 'delay-ms', defaults.delayMs),
     timeoutMs: positiveInteger(values, 'timeout-ms', defaults.timeoutMs),
@@ -58,6 +59,28 @@ async function checkHealth({ url, commit, timeoutMs }) {
   }
 }
 
+async function checkProbe({ url, timeoutMs }) {
+  const response = await fetch(new URL('./graphql', url), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query: '{ infrastructureProbe { message } }' }),
+    signal: AbortSignal.timeout(timeoutMs),
+    redirect: 'manual',
+  });
+  if (response.status !== 200) throw new Error('probe expected HTTP 200');
+  let body;
+  try {
+    body = await response.json();
+  } catch {
+    throw new Error('probe response was not valid JSON');
+  }
+  if (
+    body?.errors !== undefined ||
+    body?.data?.infrastructureProbe?.message !== 'Infrastructure probe ready.'
+  )
+    throw new Error('probe did not return canonical data without errors');
+}
+
 const delay = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -66,6 +89,7 @@ async function main() {
   for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
     try {
       await checkHealth(options);
+      if (options.probe) await checkProbe(options);
       console.log(`Health verified for commit ${options.commit}`);
       return;
     } catch (error) {

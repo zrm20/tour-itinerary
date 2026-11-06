@@ -9,7 +9,8 @@ RUN --mount=type=secret,id=proxy_ca \
 
 FROM node:24.22.2-bookworm-slim AS runtime
 ARG COMMIT_SHA
-LABEL org.opencontainers.image.revision=$COMMIT_SHA
+LABEL org.opencontainers.image.revision=$COMMIT_SHA \
+      dev.tour-itinerary.probe=graphql-v1
 ENV NODE_ENV=production COMMIT_SHA=$COMMIT_SHA PORT=8080
 WORKDIR /app
 COPY --from=build --chown=node:node /runtime/ ./

@@ -1,3 +1,4 @@
+import { probeCapability } from './probe-capability.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { appendFile } from 'node:fs/promises';
@@ -181,7 +182,7 @@ async function rollout() {
     }
     throw new Error(`Traffic did not settle exclusively on ${name}`);
   }
-  async function health(url, commit, phase) {
+  async function health(url, commit, phase, probe = true) {
     // Failure injection affects only the verifier, never the API or its data.
     if (process.env.FAIL_CHECK === phase) {
       report.checks[phase] = 'controlled failure';
@@ -194,6 +195,8 @@ async function rollout() {
         `${url}/health`,
         '--commit',
         commit,
+        '--probe',
+        String(probe),
       ]);
       report.checks[phase] = 'passed';
     } catch (error) {
@@ -294,10 +297,23 @@ async function rollout() {
         'Serving revision lacks verified commit/digest metadata; follow bootstrap runbook',
       );
     }
+    // Inspect only the captured immutable digest, never latest/current service metadata.
+    await command('docker', ['pull', oldImage]);
+    const [imageMetadata] = await json('docker', [
+      'image',
+      'inspect',
+      oldImage,
+    ]);
+    const supportsProbe = probeCapability(
+      oldImage,
+      oldCommit,
+      imageMetadata?.Config?.Labels,
+    );
     previous = {
       revision: serving[0].revisionName,
       commit: oldCommit,
       image: oldImage,
+      supportsProbe,
     };
     report.previous = previous;
     const { mode, version, runtimeVersion } = persistenceConfiguration(initial);
@@ -316,7 +332,12 @@ async function rollout() {
       report.result = 'already serving checked commit';
       return;
     }
-    await health(report.serviceUrl, oldCommit, 'previous');
+    await health(
+      report.serviceUrl,
+      oldCommit,
+      'previous',
+      previous.supportsProbe,
+    );
     if (mode === 'enabled') {
       await command('npm', [
         'ci',
@@ -458,13 +479,23 @@ async function rollout() {
             rollbackError = String(failure);
           }
           await settled(previous.revision);
-          await health(report.serviceUrl, previous.commit, 'rollback');
+          await health(
+            report.serviceUrl,
+            previous.commit,
+            'rollback',
+            previous.supportsProbe,
+          );
           report.recovery = 'previous revision restored and verified';
           if (rollbackError)
             report.rollbackReconciliation = `CLI failed but rollback verified: ${rollbackError}`;
         } else {
           await settled(previous.revision);
-          await health(report.serviceUrl, previous.commit, 'preserved');
+          await health(
+            report.serviceUrl,
+            previous.commit,
+            'preserved',
+            previous.supportsProbe,
+          );
           report.recovery =
             'candidate failed; previous traffic preserved and verified';
         }

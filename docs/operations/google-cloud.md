@@ -145,7 +145,7 @@ gcloud run revisions describe "$REVISION" --project="$PROJECT_ID" --region="$REG
 Take `REVISION`, expected full `EXPECTED_COMMIT`, digest and URLs from the successful workflow summary, then compare them with Google Cloud read-back. The traffic-bearing revision is authoritative; `latestReadyRevisionName` can be a failed-check candidate receiving no normal traffic. Health requires HTTP 200, JSON `status: ok` and the exact full commit:
 
 ```sh
-node backend/scripts/verify-health.mjs --url "$SERVICE_URL/health" --commit "$EXPECTED_COMMIT"
+node backend/scripts/verify-health.mjs --url "$SERVICE_URL/health" --commit "$EXPECTED_COMMIT" --probe "$RESTORE_PROBE"
 ```
 
 The verifier makes at most 15 attempts with a two-second request timeout and two seconds between attempts. For a candidate, use its exact tagged URL from `status.traffic`/the workflow summary. A tagged URL alone does not imply a share of normal service traffic.
@@ -163,7 +163,7 @@ Compare startup errors and request failures with the selected revision and deplo
 ## Manually restore a known revision
 
 1. Pause releases and drain outstanding runs. Inspect actual traffic, then capture the serving revision, full commit, immutable image digest, current/previous registry targets and latest workflow summary privately. Select a retained known-good revision from a successful prior release, not whichever revision happens to be latest. This procedure restores traffic, not database state or schema; verify compatibility and retained secret versions before restoring a database-consuming revision.
-2. Set `RESTORE_REVISION`, `EXPECTED_COMMIT`, `RESTORE_DIGEST` and `RESTORE_VERSION` (`sha256:...`) from that release. Read back the revision and registry version. Confirm it belongs to this service/project and is Ready, its image matches the digest, and the source label matches the full expected commit. Verify its existing tagged health URL first if one remains.
+2. Set `RESTORE_REVISION`, `EXPECTED_COMMIT`, `RESTORE_DIGEST` and `RESTORE_VERSION` (`sha256:...`) from that release. Read back the revision and registry version. Confirm it belongs to this service/project and is Ready, its image matches the digest, and the source label matches the full expected commit. Pull the exact immutable image and inspect `org.opencontainers.image.revision` and `dev.tour-itinerary.probe` as described below. Set `RESTORE_PROBE=true` for `graphql-v1`, or `false` for `health-v1` or the explicitly recorded legacy image. Missing/inconsistent capability is a recovery diagnostic; stop and reconcile rather than guessing. Verify its existing tagged health and applicable probe first if a tagged URL remains.
 
    ```sh
    gcloud run revisions describe "$RESTORE_REVISION" --project="$PROJECT_ID" --region="$REGION" \
@@ -182,7 +182,7 @@ Compare startup errors and request failures with the selected revision and deplo
      --to-revisions="$RESTORE_REVISION=100"
    gcloud run services describe "$SERVICE" --project="$PROJECT_ID" --region="$REGION" \
      --format='json(metadata.generation,status.observedGeneration,status.traffic,status.url)'
-   node backend/scripts/verify-health.mjs --url "$SERVICE_URL/health" --commit "$EXPECTED_COMMIT"
+   node backend/scripts/verify-health.mjs --url "$SERVICE_URL/health" --commit "$EXPECTED_COMMIT" --probe "$RESTORE_PROBE"
    ```
 
    Require exactly one positive-percentage target, the selected revision at 100%, and observed generation matching metadata generation. Poll read-back up to six times, two seconds apart, for convergence. A failed/timed-out update command does not prove traffic stayed unchanged: inspect actual allocation and health before deciding the next action. If it does not converge or health fails, report the actual state and retain the maintenance window; do not claim recovery or blindly repeat promotion.
@@ -249,3 +249,13 @@ gcloud storage cp \
 ```
 
 If there is no live object, use `--if-generation-match=0` after confirming that absence. This copy is a state mutation, not a routine verification command. An older state can omit newer real resources; review lineage/serial and reconcile resource ownership with imports as necessary before any apply. Run a fresh private plan and inspect its differences; restoring state alone does not roll cloud infrastructure back. If the version is already soft-deleted, use the [Cloud Storage recovery procedure](https://docs.cloud.google.com/storage/docs/use-soft-delete) within its recovery window. Do not expose the state in issue comments or public CI artifacts.
+
+### GraphQL release gates and captured rollback capability
+
+Every new candidate and promoted normal URL must pass commit-aware `/health` and `POST /graphql` with HTTP 200, valid JSON, exact stored message `Infrastructure probe ready.` and no `errors` property. `verify-health.mjs --url URL/health --commit FULL_SHA --probe true` runs both checks. Production-image verification before publication still runs health alone without PostgreSQL or deployed secrets. Each phase uses at most 15 attempts, 2 s between attempts and 2 s per HTTP request (health and probe each); the release command also bounds the verifier process to 180 s.
+
+Before any database/service mutation, delivery captures the explicit serving revision, immutable digest and source commit, pulls that exact digest, and inspects its image labels. `org.opencontainers.image.revision` must match the captured revision's `source-commit`. `dev.tour-itinerary.probe=graphql-v1` declares probe support; `health-v1` declares health only. The single legacy unlabeled commit/image pair verified in [the completed database bootstrap](https://github.com/zrm20/tour-itinerary/issues/14#issuecomment-6663264777) is explicitly recognized in `probe-capability.mjs`. No other missing/invalid label or mismatched commit is accepted. Restore metadata is recorded in the release summary. Never infer capability from an HTTP failure or replace captured metadata with current/latest service state.
+
+Candidate failure preserves previous traffic. Post-promotion failure restores the captured revision and leaves the workflow failed. Restored health/commit is always verified; GraphQL is verified only for the captured probe-capable image. This permits the first probe release to recover to the known health-only image. A failed recovery check produces `ROLLBACK/RECONCILIATION FAILED` and requires engineer recovery; inspect actual traffic and the captured revision/image/commit/capability. Unknown capability metadata stops release before mutation with an explicit recovery diagnostic; reconcile metadata against the trusted image under the maintenance procedure before retrying. Traffic rollback never undoes migrations or repairs a database outage.
+
+Manual rollback follows the same capability-aware checks: inspect the selected immutable image's metadata, verify restored commit/health, and require the probe when that image declares support. Do not manufacture shared database failures; controlled release-check failures and isolated local/CI databases provide failure-path evidence.

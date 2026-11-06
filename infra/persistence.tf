@@ -24,3 +24,16 @@ resource "google_secret_manager_secret_iam_member" "migration_database" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.deploy.email}"
 }
+
+resource "google_secret_manager_secret" "auth" {
+  secret_id = "api-auth-secret"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.api]
+}
+resource "google_secret_manager_secret_iam_member" "auth" {
+  secret_id = google_secret_manager_secret.auth.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.runtime.email}"
+}

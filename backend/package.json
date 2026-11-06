@@ -28,7 +28,9 @@
     "precheck": "npm run generate",
     "pretest:watch": "npm run generate",
     "db:shared-deploy": "node scripts/database.mjs shared-deploy",
-    "db:shared-seed": "node scripts/database.mjs shared-seed"
+    "db:shared-seed": "node scripts/database.mjs shared-seed",
+    "auth:setup": "node --env-file-if-exists=.env scripts/auth-setup.mjs",
+    "auth:signin": "node --env-file-if-exists=.env scripts/oidc-client.mjs"
   },
   "dependencies": {
     "@apollo/server": "5.5.1",

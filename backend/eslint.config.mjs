@@ -19,6 +19,7 @@ export default tseslint.config(
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
       globals: {
+        AbortController: 'readonly',
         AbortSignal: 'readonly',
         URL: 'readonly',
         process: 'readonly',

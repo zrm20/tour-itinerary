@@ -68,3 +68,45 @@ variable "migration_database_secret_version" {
     error_message = "Use an explicit positive numeric secret version."
   }
 }
+
+variable "enable_authentication" {
+  type        = bool
+  default     = false
+  description = "Engineer-controlled activation after migrations and explicit OIDC provisioning."
+  validation {
+    condition     = !var.enable_authentication || (var.enable_persistence && var.auth_secret_version != null && var.auth_issuer != null)
+    error_message = "Authentication requires activated persistence, an issuer and an explicit auth secret version."
+  }
+}
+variable "auth_secret_version" {
+  type        = string
+  default     = null
+  description = "Explicit positive numeric api-auth-secret version; no payload or latest alias."
+  validation {
+    condition     = var.auth_secret_version == null ? true : can(regex("^[1-9][0-9]*$", var.auth_secret_version))
+    error_message = "Use an explicit positive numeric secret version."
+  }
+}
+variable "auth_issuer" {
+  type        = string
+  default     = null
+  description = "Stable normal HTTPS service origin followed by /auth; never a candidate-tag URL."
+  validation {
+    condition     = var.auth_issuer == null ? true : can(regex("^https://[^/?#@]+/auth$", var.auth_issuer))
+    error_message = "Use the stable HTTPS authentication URL ending in /auth."
+  }
+}
+variable "api_audience" {
+  type        = string
+  default     = "urn:tour-itinerary:api"
+  description = "Absolute API resource URI matching explicit OIDC provisioning."
+}
+variable "access_token_ttl_seconds" {
+  type        = number
+  default     = 1800
+  description = "Access-token lifetime in seconds; initially 30 minutes."
+  validation {
+    condition     = var.access_token_ttl_seconds >= 1 && var.access_token_ttl_seconds <= 86400 && floor(var.access_token_ttl_seconds) == var.access_token_ttl_seconds
+    error_message = "Token lifetime must be an integer from 1 to 86400."
+  }
+}

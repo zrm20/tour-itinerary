@@ -20,13 +20,15 @@ Read service metadata labels `persistence-mode=enabled` and `migration-secret-ve
 
 The serialized path is: checked image verification/publication → capture previous revision/commit/digest and health → eligibility recheck → fetch selected migration version into child-process memory → locked `prisma migrate deploy` → explicit fixture seed → candidate deployment/health → promotion/normal health. No image rebuild, migration at startup or new routine approval gate is added. Failure at migration or seed stops before candidate rollout and leaves existing traffic alone. Publish-only never touches the database.
 
+Authentication has a separate disabled-by-default activation gate and individual runtime secret; follow [authentication setup](../authentication.md#shared-development) during the same maintenance process.
+
 ## Limits and verification
 
 The lazy runtime provider uses max **2** connections per instance, a **5 s** acquisition timeout, **5 s** statement timeout, **6 s** query timeout and **10 s** idle timeout, with no application retries. At the configured service maximum of two instances the steady-state budget is four runtime connections; retain headroom for overlapping revisions during deployment and traffic rollback. Cloud Run's instance cap is not an exact database connection ceiling. Runtime HTTP startup and `/health` are independent of PostgreSQL, including pre-publication image tests without secrets.
 
 The direct migration connection uses `connect_timeout=10`; the migration command's whole process group is bounded to **120 s** (including Prisma's advisory-lock handling), with role defaults of **60 s** per statement and **10 s** per lock wait with no automatic retries. Seed uses **10 s** connect, **5 s** server statement and **6 s** query timeouts; its subprocess is also bounded to 120 s. These tolerate Neon wake-up while bounding delivery failures. Inspect Neon connection/storage/compute/transfer quotas if unavailable; do not upgrade plans or raise caps automatically.
 
-After activation, privately verify migration history, canonical fixture `Infrastructure probe ready.`, and role grants using the separate logins. As runtime, SELECT must work; INSERT/UPDATE/DELETE, CREATE TABLE/SCHEMA and ALTER/DROP must be denied. Keep denial experiments in isolated local/CI databases; for shared development inspect privileges instead of injecting mutations/outages. Local/CI use the same committed migration and seed with realistic roles. Every probe release verifies both independent health/commit and the canonical GraphQL database read.
+After activation, privately verify migration history, canonical fixture `Infrastructure probe ready.`, and role grants using the separate logins. As runtime, fixture SELECT and application/authentication CRUD must work; fixture INSERT/UPDATE/DELETE, CREATE TABLE/SCHEMA and ALTER/DROP must be denied. Keep denial experiments in isolated local/CI databases; for shared development inspect privileges instead of injecting mutations/outages. Local/CI use the same committed migration and seed with realistic roles. Every probe release verifies both independent health/commit and the canonical GraphQL database read.
 
 ## Failure inspection and recovery
 

@@ -1,3 +1,4 @@
+import { Public } from '@nestjs/authentication';
 import { Catch, Inject, UseFilters } from '@nestjs/common';
 import { type GqlExceptionFilter, Query, Resolver } from '@nestjs/graphql';
 import { GraphQLError } from 'graphql';
@@ -13,6 +14,7 @@ class ProbeErrorFilter implements GqlExceptionFilter {
   }
 }
 
+@Public()
 @Resolver()
 export class ProbeResolver implements Pick<
   QueryResolvers,

@@ -1,5 +1,6 @@
 import { URLSearchParams } from 'node:url';
 import { createHash, randomBytes } from 'node:crypto';
+import { accountInput } from './auth-prompts.mjs';
 
 export function authorizationRequest({ issuer, audience, clientId, callback }) {
   const verifier = randomBytes(32).toString('base64url');
@@ -104,51 +105,86 @@ export async function signIn(options, { email, password }) {
   return exchangeCode(request, code);
 }
 
-if (process.argv[1]?.endsWith('/oidc-client.mjs')) {
+async function main() {
+  const mode = process.argv[2] ?? 'signin';
+  if (!['signin', 'register'].includes(mode))
+    throw new Error('Use auth:signin or auth:register');
   const issuer = process.env.AUTH_ISSUER;
-  const email = process.env.OIDC_EMAIL;
-  const password = process.env.OIDC_PASSWORD;
+  if (!issuer) throw new Error('AUTH_ISSUER is required');
+  const register = mode === 'register';
   if (
-    !issuer ||
-    !email ||
-    !password ||
-    !process.env.OIDC_CLIENT_ID ||
-    !process.env.OIDC_CALLBACK_URL
+    !register &&
+    (!process.env.OIDC_CLIENT_ID || !process.env.OIDC_CALLBACK_URL)
   )
-    throw new Error(
-      'AUTH_ISSUER, OIDC_EMAIL, OIDC_PASSWORD, OIDC_CLIENT_ID and OIDC_CALLBACK_URL are required',
+    throw new Error('OIDC_CLIENT_ID and OIDC_CALLBACK_URL are required');
+  const account = await accountInput(register);
+  if (register) {
+    console.log('Registering account…');
+    const response = await fetch(`${issuer}/sign-up/email`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: new URL(issuer).origin,
+      },
+      body: JSON.stringify(account),
+      signal: AbortSignal.timeout(10000),
+    });
+    // Signup may return a private session token. Never print the response body.
+    await response.body?.cancel();
+    if (!response.ok) {
+      console.error(`Registration rejected (HTTP ${response.status}).`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(
+      'Registration succeeded. Run npm run auth:signin to read your profile.',
     );
-  signIn(
+    return;
+  }
+  console.log('Signing in and loading your profile…');
+  const tokens = await signIn(
     {
       issuer,
       audience: process.env.API_AUDIENCE ?? 'urn:tour-itinerary:api',
       clientId: process.env.OIDC_CLIENT_ID,
       callback: process.env.OIDC_CALLBACK_URL,
     },
-    { email, password },
-  )
-    .then(async (tokens) => {
-      const response = await fetch(`${new URL(issuer).origin}/graphql`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${tokens.access_token}`,
-        },
-        body: JSON.stringify({
-          query:
-            '{ currentUser { id email firstName lastName preferredName displayName } }',
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
-      const result = await response.json();
-      if (!response.ok || result.errors)
-        throw new Error('Current-user request failed');
-      console.log(JSON.stringify(result.data.currentUser, null, 2));
-    })
-    .catch(() => {
+    account,
+  );
+  const response = await fetch(`${new URL(issuer).origin}/graphql`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${tokens.access_token}`,
+    },
+    body: JSON.stringify({
+      query:
+        '{ currentUser { id email firstName lastName preferredName displayName } }',
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  const result = await response.json();
+  if (!response.ok || result.errors)
+    throw new Error('Current-user request failed');
+  console.log(JSON.stringify(result.data.currentUser, null, 2));
+}
+
+if (process.argv[1]?.endsWith('/oidc-client.mjs')) {
+  main().catch((error) => {
+    // Missing configuration is actionable; provider/network diagnostics stay private.
+    const message = error instanceof Error ? error.message : '';
+    if (
+      message.endsWith(' is required without an interactive terminal') ||
+      message === 'AUTH_ISSUER is required' ||
+      message === 'OIDC_CLIENT_ID and OIDC_CALLBACK_URL are required' ||
+      message === 'Use auth:signin or auth:register'
+    )
+      console.error(message);
+    else if (error?.name === 'AbortError') console.error('Cancelled.');
+    else
       console.error(
-        'OIDC sign-in failed; tokens and credentials were not saved',
+        `OIDC ${process.argv[2] === 'register' ? 'registration' : 'sign-in'} failed; tokens and credentials were not saved`,
       );
-      process.exitCode = 1;
-    });
+    process.exitCode = 1;
+  });
 }

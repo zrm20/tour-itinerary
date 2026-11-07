@@ -17,17 +17,23 @@ npm run start:dev
 
 Explicit setup requires `MIGRATION_DATABASE_URL`, `AUTH_SECRET`, `OIDC_CLIENT_ID` and `OIDC_CALLBACK_URL`. It registers the configured API resource and native public client with required PKCE, and provisions an encrypted RS256 signing key. It is transactional and repeatable, updating the selected client's settings while preserving existing live keys. The example callback is `http://127.0.0.1:9876/callback`; only HTTP loopback `/callback` URLs are accepted. Never invoke setup implicitly at startup or on ordinary reads.
 
-Register using disposable local credentials:
+Register interactively from `backend/`:
 
 ```sh
-curl --fail-with-body http://127.0.0.1:3000/auth/sign-up/email \
-  -H 'content-type: application/json' -H 'origin: http://127.0.0.1:3000' \
-  --data '{"email":"developer@example.test","password":"local-development-password","firstName":"Alex","lastName":"River","preferredName":"Lex"}'
+npm run auth:register
 ```
 
-Email, password, first name and last name are required; preferred name is optional. There is no username, manual approval or email verification. Treat emails as unverified and signup responses containing provider session tokens as private.
+The CLI prompts for email, a password masked with `*` characters, first name, last name and an optional preferred name (press Enter to skip). Email, password, first name and last name are required; there is no username, manual approval or email verification. Emails remain unverified. The CLI prints only registration status, never the signup response's private session token.
 
-Supply `OIDC_EMAIL` and `OIDC_PASSWORD` privately through the shell or gitignored `.env`, then run `npm run auth:signin`. The reusable CLI performs sign-in, callback/state checks, code exchange with PKCE and ID-token nonce validation, then calls GraphQL with the access token. It prints only the profile and permanent application ID, saving no credentials or tokens. It follows the callback internally without a browser or callback listener.
+Then sign in and read the permanent application profile:
+
+```sh
+npm run auth:signin
+```
+
+Sign-in prompts for email and a password masked with `*` characters. Press Enter to submit each field. Registration re-prompts for passwords shorter than eight characters. Both commands announce when the HTTP request starts and report success or failure. The reusable CLI performs callback/state checks, code exchange with PKCE and ID-token nonce validation, then calls GraphQL with the access token. It prints only the profile and permanent application ID, saving no credentials or tokens. It follows the callback internally without a browser or callback listener. Ctrl+C cancels a prompt.
+
+Both commands reuse supplied `OIDC_EMAIL` and `OIDC_PASSWORD` values, prompting only for missing fields. Registration also accepts `OIDC_FIRST_NAME`, `OIDC_LAST_NAME` and optional `OIDC_PREFERRED_NAME`. Supply these privately through the environment or gitignored `.env` for noninteractive use; missing required fields fail clearly when no interactive terminal is available.
 
 Other clients send `Authorization: Bearer ACCESS_TOKEN` to `POST /graphql`:
 

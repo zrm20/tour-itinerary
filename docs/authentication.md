@@ -96,3 +96,14 @@ Keep secrets out of plans, state, workflow variables, logs and issues. Changing 
 ## Verification
 
 Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts test/update-own-names.spec.ts test/organizations.spec.ts`. Production image health checks remain independent of database and authentication secrets.
+
+## Tours owned by organizations
+
+Organization owners can create tours with `createTour(organizationId, name)`,
+read one with `tour(id)`, list accessible tours with `myTours`, and rename one
+with `renameTour(id, name)`. A `Tour` returns `id`, `name`, and `organizationId`.
+Names are trimmed and must contain a non-whitespace character; names can repeat
+within an organization. Tours require no dates or administrator assignment.
+Every operation checks current organization ownership from application data,
+including direct-ID reads and mutations. Unknown and inaccessible targets both
+return `FORBIDDEN`. Ownership grants authority over every tour in that organization.

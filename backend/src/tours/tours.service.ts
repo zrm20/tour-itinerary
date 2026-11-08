@@ -73,15 +73,16 @@ export class ToursService {
     });
   }
 
-  private async asOwner<T>(
+  private async withLockedTourOwner<T>(
     userId: string,
     tourId: string,
-    action: (tx: Prisma.TransactionClient) => Promise<T>,
+    action: (tx: Prisma.TransactionClient, owner: boolean) => Promise<T>,
   ) {
     return this.persistence.database.$transaction(async (tx) => {
       const tour = await tx.tour.findUnique({ where: { id: tourId } });
       if (!tour) throw new TourAccessDenied();
-      // Serialize with ownership changes, then recheck current owner authority.
+      // Serialize all access changes with ownership changes before reading
+      // current ownership or assigned roles.
       await tx.$queryRaw`SELECT id FROM organization WHERE id = ${tour.organizationId} FOR UPDATE`;
       const owner = await tx.organizationOwner.findUnique({
         where: {
@@ -91,6 +92,16 @@ export class ToursService {
           },
         },
       });
+      return action(tx, !!owner);
+    });
+  }
+
+  private async asOwner<T>(
+    userId: string,
+    tourId: string,
+    action: (tx: Prisma.TransactionClient) => Promise<T>,
+  ) {
+    return this.withLockedTourOwner(userId, tourId, (tx, owner) => {
       if (!owner) throw new TourAccessDenied();
       return action(tx);
     });
@@ -120,20 +131,9 @@ export class ToursService {
     userId: string,
     action: (tx: Prisma.TransactionClient) => Promise<T>,
   ) {
-    return this.persistence.database.$transaction(async (tx) => {
-      const tour = await tx.tour.findUnique({ where: { id: tourId } });
-      if (!tour) throw new TourAccessDenied();
-      // All access changes share the ownership lock. Recheck actor and target
-      // after taking it so concurrent promotions cannot be undone by an admin.
-      await tx.$queryRaw`SELECT id FROM organization WHERE id = ${tour.organizationId} FOR UPDATE`;
-      const owner = await tx.organizationOwner.findUnique({
-        where: {
-          organizationId_userId: {
-            organizationId: tour.organizationId,
-            userId: actorId,
-          },
-        },
-      });
+    return this.withLockedTourOwner(actorId, tourId, async (tx, owner) => {
+      // Recheck actor and target after locking so concurrent promotions cannot
+      // be undone by an admin.
       if (!owner) {
         const actor = await tx.tourAccess.findUnique({
           where: { tourId_userId: { tourId, userId: actorId } },

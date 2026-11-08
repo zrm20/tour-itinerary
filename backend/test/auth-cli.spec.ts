@@ -105,3 +105,10 @@ test('sign-in checks client configuration before prompting', async () => {
     'OIDC_CLIENT_ID and OIDC_CALLBACK_URL are required',
   );
 });
+test('sign-out checks client configuration before prompting', async () => {
+  const result = await run('signout');
+  expect(result.code).toBe(1);
+  expect(result.output).toContain(
+    'OIDC_CLIENT_ID and OIDC_CALLBACK_URL are required',
+  );
+});

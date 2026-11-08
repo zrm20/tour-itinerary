@@ -1,6 +1,6 @@
 # Development authentication
 
-The backend supports email/password registration and Authorization Code with S256 PKCE through its isolated Better Auth provider. The API independently validates signatures, issuer, audience, expiry and access-token kind. `currentUser` resolves a permanent application user ID through the provider identity, never by matching email. Display name uses preferred name when present, otherwise first name. There are no authentication screens or unrestricted client-registration endpoints.
+The backend supports email/password registration, Authorization Code with S256 PKCE, and RP-initiated current-session sign-out through its isolated Better Auth provider. The API independently validates signatures, issuer, audience, expiry and access-token kind. `currentUser` resolves a permanent application user ID through the provider identity, never by matching email. Display name uses preferred name when present, otherwise first name. There are no authentication screens or unrestricted client-registration endpoints. Sign-out ends only the current provider session; already-issued JWTs may remain usable until expiry.
 
 ## Local setup
 
@@ -31,9 +31,15 @@ Then sign in and read the permanent application profile:
 npm run auth:signin
 ```
 
-Sign-in prompts for email and a password masked with `*` characters. Press Enter to submit each field. Registration re-prompts for passwords shorter than eight characters. Both commands announce when the HTTP request starts and report success or failure. The reusable CLI performs callback/state checks, code exchange with PKCE and ID-token nonce validation, then calls GraphQL with the access token. It prints only the profile and permanent application ID, saving no credentials or tokens. It follows the callback internally without a browser or callback listener. Ctrl+C cancels a prompt.
+Sign out of the current provider session:
 
-Both commands reuse supplied `OIDC_EMAIL` and `OIDC_PASSWORD` values, prompting only for missing fields. Registration also accepts `OIDC_FIRST_NAME`, `OIDC_LAST_NAME` and optional `OIDC_PREFERRED_NAME`. Supply these privately through the environment or gitignored `.env` for noninteractive use; missing required fields fail clearly when no interactive terminal is available.
+```sh
+npm run auth:signout
+```
+
+Sign-in and sign-out prompt for email and a password masked with `*` characters. Press Enter to submit each field. Registration re-prompts for passwords shorter than eight characters. These commands announce when the HTTP request starts and report success or failure. The reusable CLI performs callback/state checks, code exchange with PKCE and ID-token nonce validation, then either calls GraphQL with the access token or ends that session through the provider's RP-initiated logout endpoint. Sign-in prints only the profile and permanent application ID. Sign-out discards local tokens after ending the current provider session; it does not end other sessions, and an already-issued access token may remain usable at the API until expiry. No credentials or tokens are saved. The CLI follows the callback internally without a browser or callback listener. Ctrl+C cancels a prompt.
+
+These commands reuse supplied `OIDC_EMAIL` and `OIDC_PASSWORD` values, prompting only for missing fields. Registration also accepts `OIDC_FIRST_NAME`, `OIDC_LAST_NAME` and optional `OIDC_PREFERRED_NAME`. Supply these privately through the environment or gitignored `.env` for noninteractive use; missing required fields fail clearly when no interactive terminal is available. Explicit `auth:setup` enables end-session for the trusted local client so sign-out can use the protocol boundary.
 
 Other clients send `Authorization: Bearer ACCESS_TOKEN` to `POST /graphql`:
 

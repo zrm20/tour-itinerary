@@ -89,4 +89,4 @@ Keep secrets out of plans, state, workflow variables, logs and issues. Changing 
 
 ## Verification
 
-Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts test/update-own-names.spec.ts`. Production image health checks remain independent of database and authentication secrets.
+Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts test/update-own-names.spec.ts test/organizations.spec.ts`. Production image health checks remain independent of database and authentication secrets.

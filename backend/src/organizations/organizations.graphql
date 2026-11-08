@@ -8,7 +8,7 @@ extend type Query {
   organization(id: ID!): Organization!
 }
 
-type Mutation {
+extend type Mutation {
   createOrganization(name: String!): Organization!
   renameOrganization(id: ID!, name: String!): Organization!
 }

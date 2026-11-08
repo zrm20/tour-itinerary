@@ -29,7 +29,7 @@ const safeError = (code: unknown) => {
   if (code === 'FORBIDDEN')
     return { code, message: 'Not authorized.' } as const;
   if (code === 'BAD_USER_INPUT')
-    return { code, message: 'Invalid organization name.' } as const;
+    return { code, message: 'Invalid input.' } as const;
   return {
     code: 'GRAPHQL_REQUEST_FAILED' as const,
     message: 'GraphQL request failed.',

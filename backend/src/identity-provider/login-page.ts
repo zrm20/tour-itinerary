@@ -13,11 +13,11 @@ const styles = `
 `;
 
 // Messages are fixed so they never reflect input or reveal whether an account exists.
-const script = `
+const loginScript = `
   const form = document.getElementById('login');
   const alert = document.getElementById('error');
   const button = form.querySelector('button');
-  const show = (message) => {
+  const showError = (message) => {
     alert.textContent = message;
     alert.hidden = false;
     form.elements.password.value = '';
@@ -39,19 +39,24 @@ const script = `
           oauth_query: location.search.slice(1),
         }),
       });
-      if (response.status === 401) return show('Incorrect email or password.');
+      if (response.status === 401) return showError('Incorrect email or password.');
       const result = response.ok ? await response.json() : undefined;
       const next = typeof result?.url === 'string' ? new URL(result.url, location.href) : undefined;
       if (next && (next.protocol === 'http:' || next.protocol === 'https:'))
         return location.assign(next.href);
-      show('Sign-in could not be completed. Return to your application and start sign-in again.');
+      showError('Sign-in could not be completed. Return to your application and start sign-in again.');
     } catch {
-      show('Sign-in is unavailable. Try again.');
+      showError('Sign-in is unavailable. Try again.');
     }
   });
 `;
 
-function page(nonce: string, title: string, content: string, js = '') {
+function renderDocument(
+  nonce: string,
+  title: string,
+  content: string,
+  script = '',
+) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -65,13 +70,13 @@ function page(nonce: string, title: string, content: string, js = '') {
 <h1>${title}</h1>
 ${content}
 </main>
-${js ? `<script nonce="${nonce}">${js}</script>` : ''}
+${script ? `<script nonce="${nonce}">${script}</script>` : ''}
 </body>
 </html>
 `;
 }
 
-function send(
+function sendHtml(
   response: Response,
   status: number,
   render: (nonce: string) => string,
@@ -98,10 +103,9 @@ function send(
     .send(render(nonce));
 }
 
-/** Email/password form for a verified provider continuation. */
 export function sendLoginPage(response: Response) {
-  send(response, 200, (nonce) =>
-    page(
+  sendHtml(response, 200, (nonce) =>
+    renderDocument(
       nonce,
       'Sign in',
       `<form id="login" method="post">
@@ -110,15 +114,14 @@ export function sendLoginPage(response: Response) {
 <p id="error" role="alert" hidden></p>
 <button type="submit">Sign in</button>
 </form>`,
-      script,
+      loginScript,
     ),
   );
 }
 
-/** Rejection for a missing, altered or expired continuation; offers no form. */
 export function sendInvalidLoginRequest(response: Response) {
-  send(response, 400, (nonce) =>
-    page(
+  sendHtml(response, 400, (nonce) =>
+    renderDocument(
       nonce,
       'Sign-in link invalid',
       '<p>This sign-in request is invalid or has expired. Return to your application and start sign-in again.</p>',

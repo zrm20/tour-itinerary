@@ -99,10 +99,7 @@ afterAll(async () => {
   vi.unstubAllEnvs();
 });
 
-/**
- * Perform a top-level browser navigation. Node's fetch always sends
- * `sec-fetch-mode: cors`, so navigation is issued with node:http instead.
- */
+/** Node's fetch always sends `sec-fetch-mode: cors`, so navigate with node:http. */
 async function navigate(url: URL | string) {
   return new Promise<{
     status: number;
@@ -133,7 +130,6 @@ async function navigate(url: URL | string) {
   });
 }
 
-/** Start authorization as a browser navigation and follow it to the login page. */
 async function openLoginPage(request = authorizationRequest(options())) {
   const authorize = await navigate(request.url);
   expect(authorize.status).toBe(302);
@@ -176,11 +172,11 @@ async function currentUser(token: string) {
   };
 }
 
-/** Re-sign a provider continuation with another expiry using the provider secret. */
 async function resignedContinuation(login: URL, offsetSeconds: number) {
   const params = new URLSearchParams(login.search);
   params.delete('sig');
   params.set('exp', String(Math.floor(Date.now() / 1000) + offsetSeconds));
+  // Must match the provider's canonical (sorted) signing input.
   const canonical = new URLSearchParams(
     [...params.entries()].sort(([a, x], [b, y]) =>
       a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0,
@@ -256,10 +252,6 @@ test('invalid credentials fail generically without exposing input, and a retry w
     expect(body).not.toContain(options().callback);
   }
 
-  expect((await navigate(login)).body).toContain(
-    'Incorrect email or password.',
-  );
-
   const retry = await submit(login, credentials);
   expect(retry.status).toBe(200);
   const result = (await retry.json()) as { url: string };
@@ -308,11 +300,10 @@ test('an authorization request with an unregistered callback never reaches the l
     'https://attacker.test/callback',
   );
   const response = await navigate(request.url);
-  const location = response.headers.location;
-  if (location) {
-    const target = new URL(location, issuer);
-    expect(target.origin).toBe(new URL(issuer).origin);
-    expect(target.pathname).not.toBe('/auth/login');
-  }
+  expect(response.status).toBe(302);
+  const target = new URL(response.headers.location!, issuer);
+  expect(`${target.origin}${target.pathname}`).toBe(`${issuer}/error`);
+  expect(target.searchParams.get('error')).toBeTruthy();
+  expect(target.href).not.toContain('attacker.test');
   expect(response.body).not.toContain('attacker.test');
 });

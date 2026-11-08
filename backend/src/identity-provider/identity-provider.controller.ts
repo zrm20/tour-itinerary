@@ -20,12 +20,15 @@ export class IdentityProviderController {
     private readonly persistence: Database,
   ) {}
 
+  private rejectUnconfigured(response: Response) {
+    if (this.config.enabled) return false;
+    response.status(503).json({ error: 'Authentication is not configured' });
+    return true;
+  }
+
   @Get('.well-known/openid-configuration')
   async discovery(@Res() response: Response) {
-    if (!this.config.enabled) {
-      response.status(503).json({ error: 'Authentication is not configured' });
-      return;
-    }
+    if (this.rejectUnconfigured(response)) return;
     try {
       this.provider ??= createProvider(
         this.config,
@@ -41,10 +44,7 @@ export class IdentityProviderController {
   /** Must match `loginPage` in createProvider and precede the catch-all. */
   @Get('login')
   async login(@Req() request: Request, @Res() response: Response) {
-    if (!this.config.enabled) {
-      response.status(503).json({ error: 'Authentication is not configured' });
-      return;
-    }
+    if (this.rejectUnconfigured(response)) return;
     const query = new URL(request.originalUrl, this.config.issuer).search;
     const valid = await verifyOAuthQueryParams(
       query.slice(1),
@@ -56,10 +56,7 @@ export class IdentityProviderController {
 
   @All('{*path}')
   async handle(@Req() request: Request, @Res() response: Response) {
-    if (!this.config.enabled) {
-      response.status(503).json({ error: 'Authentication is not configured' });
-      return;
-    }
+    if (this.rejectUnconfigured(response)) return;
     if (
       request.path.endsWith('/sign-up/email') &&
       request.body &&

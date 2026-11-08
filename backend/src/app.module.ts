@@ -16,6 +16,7 @@ import { IdentityProviderController } from './identity-provider/identity-provide
 import { AppConfig } from './app-config';
 import { AppConfigModule } from './app-config.module';
 import { HealthController } from './health.controller';
+import { ToursModule } from './tours/tours.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 
 const safeError = (code: unknown) => {
@@ -41,6 +42,7 @@ const safeError = (code: unknown) => {
     AppConfigModule,
     PersistenceModule,
     OrganizationsModule,
+    ToursModule,
     AuthenticationModule.forRoot(),
     GraphQLModule.forRootAsync<ApolloDriverConfig>({
       driver: ApolloDriver,

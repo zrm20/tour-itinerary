@@ -280,6 +280,7 @@ model Organization {
   id     String              @id @default(uuid())
   name   String
   owners OrganizationOwner[]
+  tours  Tour[]
 
   @@map("organization")
 }
@@ -293,4 +294,14 @@ model OrganizationOwner {
   @@id([organizationId, userId])
   @@index([userId])
   @@map("organization_owner")
+}
+
+model Tour {
+  id String @id @default(uuid())
+  name String
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@map("tour")
 }

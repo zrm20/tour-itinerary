@@ -8,6 +8,19 @@ export interface UserProfile {
   preferredName?: string | null;
 }
 
+export interface OwnNamesUpdate {
+  firstName: string;
+  lastName: string;
+  preferredName?: string | null;
+}
+
+export class InvalidOwnNames extends Error {
+  constructor(message = 'Name fields are invalid') {
+    super(message);
+    this.name = 'InvalidOwnNames';
+  }
+}
+
 @Injectable()
 export class UsersService {
   constructor(private readonly persistence: Database) {}
@@ -41,7 +54,32 @@ export class UsersService {
         include: { user: true },
       });
     if (!identity) return null;
-    const user = identity.user;
+    return this.withDisplayName(identity.user);
+  }
+
+  async updateOwnNames(userId: string, input: OwnNamesUpdate) {
+    const firstName = requireName(input.firstName, 'firstName');
+    const lastName = requireName(input.lastName, 'lastName');
+    const preferredName =
+      input.preferredName == null
+        ? null
+        : requireName(input.preferredName, 'preferredName');
+    const user = await this.persistence.database.applicationUser.update({
+      where: { id: userId },
+      data: { firstName, lastName, preferredName },
+    });
+    return this.withDisplayName(user);
+  }
+
+  private withDisplayName<
+    T extends { firstName: string; preferredName: string | null },
+  >(user: T) {
     return { ...user, displayName: user.preferredName ?? user.firstName };
   }
+}
+
+function requireName(value: string, field: string) {
+  const trimmed = value.trim();
+  if (!trimmed) throw new InvalidOwnNames(`${field} is required`);
+  return trimmed;
 }

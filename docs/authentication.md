@@ -50,6 +50,23 @@ query {
 }
 ```
 
+A signed-in user can update their own first name, last name, and optional preferred name. Required names cannot be blank; preferred name may be set, changed, or cleared with `null`. The mutation returns the updated profile, including `displayName` (`preferredName` when present, otherwise `firstName`). It does not change email, password, or the permanent application ID, and cannot target another user.
+
+```graphql
+mutation {
+  updateOwnNames(
+    input: { firstName: "Alexander", lastName: "Jonas", preferredName: "Alex" }
+  ) {
+    id
+    email
+    firstName
+    lastName
+    preferredName
+    displayName
+  }
+}
+```
+
 ID tokens and provider session tokens are rejected as API access tokens. Health and the infrastructure probe remain public. Leaving `AUTH_ISSUER` unset disables authentication and retains database-free startup and health. No startup or ordinary read migrates, seeds or provisions authentication.
 
 Authenticated users can create named organizations, list and read organizations they own, and rename an owned organization through schema-first GraphQL. Creation atomically records the permanent application user as the first organization owner. Organization names are not unique. Ownership is a user-to-organization association keyed by application user ID, never email or provider session records. Unauthenticated callers and nonowners cannot read or rename unrelated organizations.
@@ -66,4 +83,4 @@ Keep secrets out of plans, state, workflow variables, logs and issues. Changing 
 
 ## Verification
 
-Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts`. Production image health checks remain independent of database and authentication secrets.
+Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts test/update-own-names.spec.ts`. Production image health checks remain independent of database and authentication secrets.

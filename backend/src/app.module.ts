@@ -11,6 +11,7 @@ import { AuthConfig } from './authentication/auth.config';
 import { ApiBearerProvider } from './authentication/api-bearer.provider';
 import { UsersService } from './users/users.service';
 import { QueryResolver } from './graphql/query.resolver';
+import { MutationResolver } from './graphql/mutation.resolver';
 import { IdentityProviderController } from './identity-provider/identity-provider.controller';
 import { AppConfig } from './app-config';
 import { AppConfigModule } from './app-config.module';
@@ -67,6 +68,7 @@ const safeError = (code: unknown) => {
     UsersService,
     ApiBearerProvider,
     QueryResolver,
+    MutationResolver,
     ProbeService,
     ProbeResolver,
     {

@@ -1,0 +1,15 @@
+type Tour {
+  id: ID!
+  name: String!
+  organizationId: ID!
+}
+
+extend type Query {
+  myTours: [Tour!]!
+  tour(id: ID!): Tour!
+}
+
+extend type Mutation {
+  renameTour(id: ID!, name: String!): Tour!
+  createTour(organizationId: ID!, name: String!): Tour!
+}

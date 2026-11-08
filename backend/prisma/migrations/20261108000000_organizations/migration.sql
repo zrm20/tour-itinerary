@@ -23,5 +23,6 @@ ALTER TABLE "organization_owner" ADD CONSTRAINT "organization_owner_organization
 -- AddForeignKey
 ALTER TABLE "organization_owner" ADD CONSTRAINT "organization_owner_userId_fkey" FOREIGN KEY ("userId") REFERENCES "application_user"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- Limited runtime CRUD for application organization tables.
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "organization", "organization_owner" TO it_runtime;
+-- Limited runtime grants for create/list/read/rename (no deletion in this flow).
+GRANT SELECT, INSERT, UPDATE ON TABLE "organization" TO it_runtime;
+GRANT SELECT, INSERT ON TABLE "organization_owner" TO it_runtime;

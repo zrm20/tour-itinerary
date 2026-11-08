@@ -9,12 +9,25 @@ import {
 import { CurrentUser } from '@nestjs/authentication';
 import { GraphQLError } from 'graphql';
 import type { User } from '../generated/graphql';
-import { OrganizationsService } from './organizations.service';
+import {
+  InvalidOrganizationName,
+  OrganizationAccessDenied,
+  OrganizationsService,
+} from './organizations.service';
 
-@Catch(GraphQLError)
+@Catch(InvalidOrganizationName, OrganizationAccessDenied)
 class OrganizationErrorFilter implements GqlExceptionFilter {
-  catch(error: GraphQLError): GraphQLError {
-    return error;
+  catch(
+    error: InvalidOrganizationName | OrganizationAccessDenied,
+  ): GraphQLError {
+    if (error instanceof InvalidOrganizationName) {
+      return new GraphQLError(error.message, {
+        extensions: { code: 'BAD_USER_INPUT' },
+      });
+    }
+    return new GraphQLError(error.message, {
+      extensions: { code: 'FORBIDDEN' },
+    });
   }
 }
 

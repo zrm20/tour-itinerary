@@ -1,21 +1,24 @@
 import { Injectable } from '@nestjs/common';
-import { GraphQLError } from 'graphql';
 import { Database } from '../persistence/database';
+
+export class InvalidOrganizationName extends Error {
+  constructor(message = 'Invalid organization name.') {
+    super(message);
+    this.name = 'InvalidOrganizationName';
+  }
+}
+
+export class OrganizationAccessDenied extends Error {
+  constructor(message = 'Not authorized.') {
+    super(message);
+    this.name = 'OrganizationAccessDenied';
+  }
+}
 
 function requireName(name: string): string {
   const trimmed = name.trim();
-  if (!trimmed) {
-    throw new GraphQLError('Invalid organization name.', {
-      extensions: { code: 'BAD_USER_INPUT' },
-    });
-  }
+  if (!trimmed) throw new InvalidOrganizationName();
   return trimmed;
-}
-
-function forbidden(): never {
-  throw new GraphQLError('Not authorized.', {
-    extensions: { code: 'FORBIDDEN' },
-  });
 }
 
 @Injectable()
@@ -49,7 +52,7 @@ export class OrganizationsService {
         select: { id: true, name: true },
       },
     );
-    if (!organization) forbidden();
+    if (!organization) throw new OrganizationAccessDenied();
     return organization;
   }
 
@@ -61,7 +64,7 @@ export class OrganizationsService {
           organizationId_userId: { organizationId, userId },
         },
       });
-    if (!ownership) forbidden();
+    if (!ownership) throw new OrganizationAccessDenied();
     return this.persistence.database.organization.update({
       where: { id: organizationId },
       data: { name: organizationName },

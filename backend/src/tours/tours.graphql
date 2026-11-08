@@ -11,6 +11,8 @@ extend type Query {
 }
 
 extend type Mutation {
+  grantTourMember(tourId: ID!, userId: ID!): TourAccess!
+  removeTourMember(tourId: ID!, userId: ID!): Boolean!
   grantTourAdmin(tourId: ID!, userId: ID!): TourAccess!
   removeTourAdmin(tourId: ID!, userId: ID!): Boolean!
   renameTour(id: ID!, name: String!): Tour!
@@ -18,6 +20,7 @@ extend type Mutation {
 }
 
 enum TourRole {
+  MEMBER
   ADMIN
 }
 

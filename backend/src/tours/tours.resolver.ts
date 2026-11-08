@@ -84,4 +84,21 @@ export class ToursResolver {
   ) {
     return this.tours.removeAdmin(user.id, tourId, userId);
   }
+  @Mutation()
+  grantTourMember(
+    @CurrentUser() user: User,
+    @Args('tourId') tourId: string,
+    @Args('userId') userId: string,
+  ) {
+    return this.tours.grantMember(user.id, tourId, userId);
+  }
+
+  @Mutation()
+  removeTourMember(
+    @CurrentUser() user: User,
+    @Args('tourId') tourId: string,
+    @Args('userId') userId: string,
+  ) {
+    return this.tours.removeMember(user.id, tourId, userId);
+  }
 }

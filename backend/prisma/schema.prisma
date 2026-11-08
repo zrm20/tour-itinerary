@@ -309,6 +309,7 @@ model Tour {
 }
 
 enum TourRole {
+  MEMBER
   ADMIN
 }
 

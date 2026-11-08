@@ -6,11 +6,15 @@ export class TourAccessDenied extends Error {}
 export class InvalidTourName extends Error {}
 export class InvalidTourUser extends Error {}
 
-function accessible(userId: string): Prisma.TourWhereInput {
+function accessible(userId: string, manage = false): Prisma.TourWhereInput {
   return {
     OR: [
       { organization: { owners: { some: { userId } } } },
-      { access: { some: { userId, role: 'ADMIN' } } },
+      {
+        access: {
+          some: { userId, ...(manage ? { role: 'ADMIN' as const } : {}) },
+        },
+      },
     ],
   };
 }
@@ -36,7 +40,7 @@ export class ToursService {
     const tourName = name.trim();
     if (!tourName) throw new InvalidTourName();
     const result = await this.persistence.database.tour.updateMany({
-      where: { id, ...accessible(userId) },
+      where: { id, ...accessible(userId, true) },
       data: { name: tourName },
     });
     if (!result.count) throw new TourAccessDenied();
@@ -59,7 +63,10 @@ export class ToursService {
   }
 
   async listAccess(userId: string, tourId: string) {
-    await this.read(userId, tourId);
+    const tour = await this.persistence.database.tour.findFirst({
+      where: { id: tourId, ...accessible(userId, true) },
+    });
+    if (!tour) throw new TourAccessDenied();
     return this.persistence.database.tourAccess.findMany({
       where: { tourId },
       orderBy: { userId: 'asc' },
@@ -103,6 +110,58 @@ export class ToursService {
 
   async removeAdmin(actorId: string, tourId: string, userId: string) {
     return this.asOwner(actorId, tourId, async (tx) => {
+      await tx.tourAccess.deleteMany({ where: { tourId, userId } });
+      return true;
+    });
+  }
+  private async asMemberManager<T>(
+    actorId: string,
+    tourId: string,
+    userId: string,
+    action: (tx: Prisma.TransactionClient) => Promise<T>,
+  ) {
+    return this.persistence.database.$transaction(async (tx) => {
+      const tour = await tx.tour.findUnique({ where: { id: tourId } });
+      if (!tour) throw new TourAccessDenied();
+      // All access changes share the ownership lock. Recheck actor and target
+      // after taking it so concurrent promotions cannot be undone by an admin.
+      await tx.$queryRaw`SELECT id FROM organization WHERE id = ${tour.organizationId} FOR UPDATE`;
+      const owner = await tx.organizationOwner.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: tour.organizationId,
+            userId: actorId,
+          },
+        },
+      });
+      if (!owner) {
+        const actor = await tx.tourAccess.findUnique({
+          where: { tourId_userId: { tourId, userId: actorId } },
+        });
+        const target = await tx.tourAccess.findUnique({
+          where: { tourId_userId: { tourId, userId } },
+        });
+        if (actor?.role !== 'ADMIN' || target?.role === 'ADMIN')
+          throw new TourAccessDenied();
+      }
+      return action(tx);
+    });
+  }
+
+  async grantMember(actorId: string, tourId: string, userId: string) {
+    return this.asMemberManager(actorId, tourId, userId, async (tx) => {
+      if (!(await tx.applicationUser.findUnique({ where: { id: userId } })))
+        throw new InvalidTourUser();
+      return tx.tourAccess.upsert({
+        where: { tourId_userId: { tourId, userId } },
+        create: { tourId, userId, role: 'MEMBER' },
+        update: { role: 'MEMBER' },
+      });
+    });
+  }
+
+  async removeMember(actorId: string, tourId: string, userId: string) {
+    return this.asMemberManager(actorId, tourId, userId, async (tx) => {
       await tx.tourAccess.deleteMany({ where: { tourId, userId } });
       return true;
     });

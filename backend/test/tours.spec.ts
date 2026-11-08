@@ -444,3 +444,283 @@ test('only owners control admins and revocation affects the same bearer token im
     (await renameTour(owner, tour.id, 'Owner remains')).errors,
   ).toBeUndefined();
 });
+
+async function idOf(token: string) {
+  return (
+    await graphql<{ currentUser: { id: string } }>(
+      '{ currentUser { id } }',
+      token,
+    )
+  ).data!.currentUser.id;
+}
+async function accessMutation(
+  operation: string,
+  token: string | undefined,
+  tour: string,
+  user: string,
+) {
+  const selection = operation.startsWith('grant') ? ' { userId role }' : '';
+  return graphql(
+    `mutation ($tour: ID!, $user: ID!) { ${operation}(tourId: $tour, userId: $user)${selection} }`,
+    token,
+    { tour, user },
+  );
+}
+async function assignments(token: string, tour: string) {
+  return graphql<{ tourAccess: { userId: string; role: string }[] }>(
+    'query ($tour: ID!) { tourAccess(tourId: $tour) { userId role } }',
+    token,
+    { tour },
+  );
+}
+
+test('owners and admins grant read-only members while every admin mutation path protects current admins', async () => {
+  const owner = (await register('members-owner@example.test', 'Owner', 'One'))
+    .access_token;
+  const admin = (await register('members-admin@example.test', 'Admin', 'One'))
+    .access_token;
+  const member = (
+    await register('members-member@example.test', 'Member', 'One')
+  ).access_token;
+  const adminId = await idOf(admin);
+  const memberId = await idOf(member);
+  const org = (await createOrganization(owner, 'Members')).data!
+    .createOrganization.id;
+  const tour = (await createTour(owner, org, 'Assigned')).data!.createTour;
+  const sibling = (await createTour(owner, org, 'Sibling')).data!.createTour;
+  await accessMutation('grantTourAdmin', owner, tour.id, adminId);
+  expect(
+    (await accessMutation('grantTourMember', admin, tour.id, memberId)).data,
+  ).toEqual({ grantTourMember: { userId: memberId, role: 'MEMBER' } });
+  expect((await readTour(member, tour.id)).data!.tour).toEqual(tour);
+  expect((await myTours(member)).data!.myTours).toEqual([tour]);
+  for (const operation of [
+    'grantTourAdmin',
+    'grantTourMember',
+    'removeTourAdmin',
+    'removeTourMember',
+  ]) {
+    expect(
+      (await accessMutation(operation, member, tour.id, adminId)).errors?.[0]
+        ?.extensions.code,
+    ).toBe('FORBIDDEN');
+    expect(
+      (await accessMutation(operation, admin, tour.id, adminId)).errors?.[0]
+        ?.extensions.code,
+    ).toBe('FORBIDDEN');
+  }
+  for (const operation of ['grantTourAdmin', 'removeTourAdmin']) {
+    expect(
+      (await accessMutation(operation, admin, tour.id, memberId)).errors?.[0]
+        ?.extensions.code,
+    ).toBe('FORBIDDEN');
+  }
+  for (const operation of [
+    'mutation ($org: ID!) { renameOrganization(id: $org, name: "No") { id } }',
+    'mutation ($org: ID!) { createTour(organizationId: $org, name: "No") { id } }',
+    'mutation ($org: ID!, $user: ID!) { grantOrganizationOwner(organizationId: $org, userId: $user) }',
+    'mutation ($org: ID!, $user: ID!) { removeOrganizationOwner(organizationId: $org, userId: $user) }',
+  ]) {
+    expect(
+      (await graphql(operation, member, { org, user: adminId })).errors?.[0]
+        ?.extensions.code,
+    ).toBe('FORBIDDEN');
+  }
+  expect(
+    (await renameTour(member, tour.id, 'No')).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (await assignments(member, tour.id)).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (await readTour(member, sibling.id)).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (
+      await graphql(
+        'query ($id: ID!) { organization(id: $id) { id } }',
+        member,
+        { id: org },
+      )
+    ).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (await accessMutation('grantTourMember', admin, tour.id, 'missing'))
+      .errors?.[0]?.extensions.code,
+  ).toBe('BAD_USER_INPUT');
+  expect(
+    (await accessMutation('removeTourMember', admin, tour.id, memberId)).errors,
+  ).toBeUndefined();
+  expect((await readTour(member, tour.id)).errors?.[0]?.extensions.code).toBe(
+    'FORBIDDEN',
+  );
+});
+
+async function ownership(
+  operation: string,
+  token: string,
+  organizationId: string,
+  userId: string,
+) {
+  return graphql(
+    `mutation ($org: ID!, $user: ID!) { ${operation}(organizationId: $org, userId: $user) }`,
+    token,
+    { org: organizationId, user: userId },
+  );
+}
+
+test('owner role replacements take effect on the next request and concurrent member operations preserve admin boundaries', async () => {
+  const owner = (await register('replace-owner@example.test', 'Owner', 'One'))
+    .access_token;
+  const admin = (await register('replace-admin@example.test', 'Admin', 'One'))
+    .access_token;
+  const target = (
+    await register('replace-target@example.test', 'Target', 'One')
+  ).access_token;
+  const adminId = await idOf(admin);
+  const targetId = await idOf(target);
+  const org = (await createOrganization(owner, 'Replace')).data!
+    .createOrganization.id;
+  const tour = (await createTour(owner, org, 'First')).data!.createTour;
+  const second = (await createTour(owner, org, 'Second')).data!.createTour;
+  await accessMutation('grantTourAdmin', owner, tour.id, adminId);
+  await accessMutation('grantTourMember', owner, second.id, targetId);
+  await accessMutation('grantTourAdmin', owner, tour.id, targetId);
+  expect(
+    (await renameTour(target, tour.id, 'Admin edit')).errors,
+  ).toBeUndefined();
+  expect(
+    (await renameTour(target, second.id, 'No')).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  await accessMutation('grantTourMember', owner, tour.id, targetId);
+  expect((await readTour(target, tour.id)).errors).toBeUndefined();
+  expect(
+    (await renameTour(target, tour.id, 'No')).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (await assignments(target, tour.id)).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  await accessMutation('grantTourAdmin', owner, tour.id, targetId);
+  expect(
+    (await renameTour(target, tour.id, 'Admin again')).errors,
+  ).toBeUndefined();
+  // Whichever transaction gets the lock first, an admin cannot overwrite or
+  // delete the owner's promotion. Subsequent requests observe one ADMIN row.
+  for (const operation of ['grantTourMember', 'removeTourMember']) {
+    await accessMutation('grantTourMember', owner, tour.id, targetId);
+    const results = await Promise.all([
+      accessMutation('grantTourAdmin', owner, tour.id, targetId),
+      accessMutation(operation, admin, tour.id, targetId),
+    ]);
+    expect(results[0].errors).toBeUndefined();
+    expect((await assignments(owner, tour.id)).data!.tourAccess).toEqual(
+      expect.arrayContaining([{ userId: targetId, role: 'ADMIN' }]),
+    );
+    expect((await assignments(owner, tour.id)).data!.tourAccess).toHaveLength(
+      2,
+    );
+  }
+  await accessMutation('grantTourMember', owner, tour.id, targetId);
+  const repeated = await Promise.all([
+    accessMutation('grantTourMember', admin, tour.id, targetId),
+    accessMutation('grantTourMember', admin, tour.id, targetId),
+  ]);
+  expect(repeated.every((result) => !result.errors)).toBe(true);
+  expect((await assignments(owner, tour.id)).data!.tourAccess).toHaveLength(2);
+  for (const operation of ['grantTourMember', 'removeTourMember']) {
+    expect(
+      (await accessMutation(operation, undefined, tour.id, targetId))
+        .errors?.[0]?.extensions.code,
+    ).toBe('UNAUTHENTICATED');
+    expect(
+      (await accessMutation(operation, admin, second.id, targetId)).errors?.[0]
+        ?.extensions.code,
+    ).toBe('FORBIDDEN');
+    expect(
+      (await accessMutation(operation, owner, 'missing', targetId)).errors?.[0]
+        ?.extensions.code,
+    ).toBe('FORBIDDEN');
+  }
+  await accessMutation('removeTourMember', admin, tour.id, targetId);
+  expect((await readTour(target, tour.id)).errors?.[0]?.extensions.code).toBe(
+    'FORBIDDEN',
+  );
+  expect((await myTours(target)).data!.myTours).toEqual([second]);
+});
+
+test('name changes preserve ownership and tour access while ownership transitions preserve both explicit assigned roles', async () => {
+  const owner = (
+    await register('independent-owner@example.test', 'Owner', 'One')
+  ).access_token;
+  const admin = (
+    await register('independent-admin@example.test', 'Admin', 'One')
+  ).access_token;
+  const member = (
+    await register('independent-member@example.test', 'Member', 'One')
+  ).access_token;
+  const unassigned = (
+    await register('independent-unassigned@example.test', 'Unassigned', 'One')
+  ).access_token;
+  const org = (await createOrganization(owner, 'Independent')).data!
+    .createOrganization.id;
+  const tour = (await createTour(owner, org, 'Independent')).data!.createTour;
+  await accessMutation('grantTourAdmin', owner, tour.id, await idOf(admin));
+  await accessMutation('grantTourMember', owner, tour.id, await idOf(member));
+  for (const token of [admin, member, unassigned]) {
+    const userId = await idOf(token);
+    await ownership('grantOrganizationOwner', owner, org, userId);
+    const changed = await graphql<{ updateOwnNames: { id: string } }>(
+      'mutation { updateOwnNames(input: { firstName: "Changed", lastName: "Name", preferredName: "Crew" }) { id } }',
+      token,
+    );
+    expect(changed.errors).toBeUndefined();
+    expect(changed.data!.updateOwnNames.id).toBe(userId);
+    expect(
+      (
+        await graphql(
+          'query ($id: ID!) { organization(id: $id) { id } }',
+          token,
+          { id: org },
+        )
+      ).errors,
+    ).toBeUndefined();
+    expect(
+      (await renameTour(token, tour.id, 'As owner')).errors,
+    ).toBeUndefined();
+    await ownership('removeOrganizationOwner', token, org, userId);
+    expect(
+      (
+        await graphql(
+          'query ($id: ID!) { organization(id: $id) { id } }',
+          token,
+          { id: org },
+        )
+      ).errors?.[0]?.extensions.code,
+    ).toBe('FORBIDDEN');
+  }
+  expect((await renameTour(admin, tour.id, 'As admin')).errors).toBeUndefined();
+  expect((await readTour(member, tour.id)).errors).toBeUndefined();
+  expect(
+    (await renameTour(member, tour.id, 'No')).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (await readTour(unassigned, tour.id)).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect((await myTours(unassigned)).data!.myTours).toEqual([]);
+  expect((await assignments(owner, tour.id)).data!.tourAccess).toEqual(
+    expect.arrayContaining([
+      { userId: await idOf(admin), role: 'ADMIN' },
+      { userId: await idOf(member), role: 'MEMBER' },
+    ]),
+  );
+  const fresh = (
+    await register('independent-fresh@example.test', 'Fresh', 'User')
+  ).access_token;
+  expect((await myTours(fresh)).data!.myTours).toEqual([]);
+  expect((await graphql('{ myOrganizations { id } }', fresh)).data).toEqual({
+    myOrganizations: [],
+  });
+  expect((await readTour(fresh, tour.id)).errors?.[0]?.extensions.code).toBe(
+    'FORBIDDEN',
+  );
+});

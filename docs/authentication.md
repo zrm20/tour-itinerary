@@ -107,3 +107,22 @@ within an organization. Tours require no dates or administrator assignment.
 Every operation checks current organization ownership from application data,
 including direct-ID reads and mutations. Unknown and inaccessible targets both
 return `FORBIDDEN`. Ownership grants authority over every tour in that organization.
+
+## Assigned tour admins
+
+An organization owner grants admin access to a registered application user with
+`grantTourAdmin(tourId, userId)` and removes it with
+`removeTourAdmin(tourId, userId)`. Repeated grants preserve one assignment per
+user/tour; repeated removals succeed. Unknown grant targets return `BAD_USER_INPUT`.
+Owners and assigned admins can list assignments with `tourAccess(tourId)`, which
+returns `tourId`, `userId`, and `role` (`ADMIN`). Only owners can change admin
+assignments, including an admin's own assignment.
+
+Assigned admins can read and rename that tour, and `myTours` combines their
+assigned tours with tours available through ownership without duplicates. The
+assignment grants no sibling-tour or organization authority. Owners retain full
+tour authority without an explicit assignment; removing their assignment leaves
+ownership intact. Assignments reference permanent application user IDs and remain
+independent of ownership. Revocation changes the next request with the same valid
+access token. Admin-assignment changes serialize on the organization row with
+ownership changes and recheck the actor's authority after obtaining the lock.

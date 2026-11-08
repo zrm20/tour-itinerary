@@ -11,16 +11,20 @@ import { GraphQLError } from 'graphql';
 import type { User } from '../generated/graphql';
 import {
   InvalidTourName,
+  InvalidTourUser,
   TourAccessDenied,
   ToursService,
 } from './tours.service';
 
-@Catch(InvalidTourName, TourAccessDenied)
+@Catch(InvalidTourName, InvalidTourUser, TourAccessDenied)
 class TourErrorFilter implements GqlExceptionFilter {
-  catch(error: InvalidTourName | TourAccessDenied): GraphQLError {
+  catch(
+    error: InvalidTourName | InvalidTourUser | TourAccessDenied,
+  ): GraphQLError {
     return new GraphQLError('Tour operation rejected.', {
       extensions: {
-        code: error instanceof InvalidTourName ? 'BAD_USER_INPUT' : 'FORBIDDEN',
+        code:
+          error instanceof TourAccessDenied ? 'FORBIDDEN' : 'BAD_USER_INPUT',
       },
     });
   }
@@ -57,5 +61,27 @@ export class ToursResolver {
     @Args('name') name: string,
   ) {
     return this.tours.create(user.id, organizationId, name);
+  }
+  @Query()
+  tourAccess(@CurrentUser() user: User, @Args('tourId') tourId: string) {
+    return this.tours.listAccess(user.id, tourId);
+  }
+
+  @Mutation()
+  grantTourAdmin(
+    @CurrentUser() user: User,
+    @Args('tourId') tourId: string,
+    @Args('userId') userId: string,
+  ) {
+    return this.tours.grantAdmin(user.id, tourId, userId);
+  }
+
+  @Mutation()
+  removeTourAdmin(
+    @CurrentUser() user: User,
+    @Args('tourId') tourId: string,
+    @Args('userId') userId: string,
+  ) {
+    return this.tours.removeAdmin(user.id, tourId, userId);
   }
 }

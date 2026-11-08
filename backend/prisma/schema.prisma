@@ -260,6 +260,7 @@ model ApplicationUser {
   preferredName String?
   identities    ProviderIdentity[]
   ownerships    OrganizationOwner[]
+  tourAccess    TourAccess[]
 
   @@map("application_user")
 }
@@ -301,7 +302,24 @@ model Tour {
   name String
   organizationId String
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  access TourAccess[]
 
   @@index([organizationId])
   @@map("tour")
+}
+
+enum TourRole {
+  ADMIN
+}
+
+model TourAccess {
+  tourId String
+  userId String
+  role TourRole
+  tour Tour @relation(fields: [tourId], references: [id], onDelete: Restrict)
+  user ApplicationUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@id([tourId, userId])
+  @@index([userId])
+  @@map("tour_access")
 }

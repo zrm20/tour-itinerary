@@ -89,6 +89,18 @@ it('returns only status and the full source SHA in production', async () => {
   });
 });
 
+it('reports the login page as unavailable when authentication is not configured', async () => {
+  const response = await fetch(`${await startApp()}/auth/login`, {
+    headers: { accept: 'text/html' },
+    signal: AbortSignal.timeout(2_000),
+  });
+
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({
+    error: 'Authentication is not configured',
+  });
+});
+
 it('starts and serves health with authentication configured and PostgreSQL unavailable', async () => {
   vi.stubEnv('AUTH_ISSUER', 'http://127.0.0.1:3000/auth');
   vi.stubEnv('AUTH_SECRET', 'test-only-secret-at-least-thirty-two-characters');

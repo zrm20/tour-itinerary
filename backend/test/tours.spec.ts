@@ -279,3 +279,168 @@ test('owners rename tours while invalid targets, names, nonowners and anonymous 
   ).toBe('UNAUTHENTICATED');
   expect((await readTour(alice, tour.id)).data!.tour.name).toBe('New name');
 });
+
+test('owners assign a registered admin once and the admin can manage only that tour', async () => {
+  const owner = (await register('access-owner@example.test', 'Access', 'Owner'))
+    .access_token;
+  const admin = (
+    await register('access-admin@example.test', 'Assigned', 'Admin')
+  ).access_token;
+  const userId = (
+    await graphql<{ currentUser: { id: string } }>(
+      '{ currentUser { id } }',
+      admin,
+    )
+  ).data!.currentUser.id;
+  const org = (await createOrganization(owner, 'Access')).data!
+    .createOrganization.id;
+  const tour = (await createTour(owner, org, 'Assigned')).data!.createTour;
+  const sibling = (await createTour(owner, org, 'Sibling')).data!.createTour;
+  const grant =
+    'mutation ($tour: ID!, $user: ID!) { grantTourAdmin(tourId: $tour, userId: $user) { userId role } }';
+  const variables = { tour: tour.id, user: userId };
+  for (let i = 0; i < 2; i++) {
+    const result = await graphql(grant, owner, variables);
+    expect(result.errors).toBeUndefined();
+    expect(result.data).toEqual({ grantTourAdmin: { userId, role: 'ADMIN' } });
+  }
+  const simultaneous = await Promise.all([
+    graphql(grant, owner, variables),
+    graphql(grant, owner, variables),
+  ]);
+  expect(simultaneous.every((result) => !result.errors)).toBe(true);
+  const assignments = await graphql(
+    'query ($tour: ID!) { tourAccess(tourId: $tour) { userId role } }',
+    owner,
+    { tour: tour.id },
+  );
+  expect(assignments.data).toEqual({ tourAccess: [{ userId, role: 'ADMIN' }] });
+  expect((await readTour(admin, tour.id)).data!.tour).toEqual(tour);
+  expect(
+    (await renameTour(admin, tour.id, 'Managed')).data!.renameTour.name,
+  ).toBe('Managed');
+  expect((await myTours(admin)).data!.myTours.map((t) => t.id)).toEqual([
+    tour.id,
+  ]);
+  expect((await readTour(admin, sibling.id)).errors?.[0]?.extensions.code).toBe(
+    'FORBIDDEN',
+  );
+  expect(
+    (await renameTour(admin, sibling.id, 'No')).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+});
+
+test('only owners control admins and revocation affects the same bearer token immediately', async () => {
+  const owner = (await register('revoke-owner@example.test', 'Owner', 'One'))
+    .access_token;
+  const admin = (await register('revoke-admin@example.test', 'Admin', 'One'))
+    .access_token;
+  const other = (await register('revoke-other@example.test', 'Admin', 'Two'))
+    .access_token;
+  const idOf = async (token: string) =>
+    (
+      await graphql<{ currentUser: { id: string } }>(
+        '{ currentUser { id } }',
+        token,
+      )
+    ).data!.currentUser.id;
+  const adminId = await idOf(admin);
+  const otherId = await idOf(other);
+  const ownerId = await idOf(owner);
+  const org = (await createOrganization(owner, 'Private')).data!
+    .createOrganization.id;
+  const tour = (await createTour(owner, org, 'Controlled')).data!.createTour;
+  const foreignOrg = (await createOrganization(other, 'Other')).data!
+    .createOrganization.id;
+  const foreignTour = (await createTour(other, foreignOrg, 'Other')).data!
+    .createTour;
+  const grant =
+    'mutation ($tour: ID!, $user: ID!) { grantTourAdmin(tourId: $tour, userId: $user) { userId } }';
+  const remove =
+    'mutation ($tour: ID!, $user: ID!) { removeTourAdmin(tourId: $tour, userId: $user) }';
+  const list = 'query ($tour: ID!) { tourAccess(tourId: $tour) { userId } }';
+  for (const user of [adminId, otherId, ownerId]) {
+    expect(
+      (await graphql(grant, owner, { tour: tour.id, user })).errors,
+    ).toBeUndefined();
+  }
+  expect(
+    (await graphql(list, admin, { tour: tour.id })).errors,
+  ).toBeUndefined();
+  for (const user of [adminId, otherId, ownerId]) {
+    for (const query of [grant, remove]) {
+      expect(
+        (await graphql(query, admin, { tour: tour.id, user })).errors?.[0]
+          ?.extensions.code,
+      ).toBe('FORBIDDEN');
+    }
+  }
+  for (const query of [grant, remove]) {
+    for (const target of [foreignTour.id, 'missing']) {
+      expect(
+        (await graphql(query, owner, { tour: target, user: adminId }))
+          .errors?.[0]?.extensions.code,
+      ).toBe('FORBIDDEN');
+    }
+    expect(
+      (await graphql(query, undefined, { tour: tour.id, user: adminId }))
+        .errors?.[0]?.extensions.code,
+    ).toBe('UNAUTHENTICATED');
+  }
+  expect(
+    (await graphql(grant, owner, { tour: tour.id, user: 'unregistered' }))
+      .errors?.[0]?.extensions.code,
+  ).toBe('BAD_USER_INPUT');
+  expect(
+    (await graphql(list, admin, { tour: foreignTour.id })).errors?.[0]
+      ?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (
+      await graphql(
+        'query ($id: ID!) { organization(id: $id) { id } }',
+        admin,
+        { id: org },
+      )
+    ).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (
+      await graphql(
+        'mutation ($id: ID!) { renameOrganization(id: $id, name: "No") { id } }',
+        admin,
+        { id: org },
+      )
+    ).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (await createTour(admin, org, 'No')).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  const own = (await createOrganization(admin, 'Independent')).data!
+    .createOrganization.id;
+  const ownTour = (await createTour(admin, own, 'Own')).data!.createTour;
+  expect((await myTours(admin)).data!.myTours.map((t) => t.id).sort()).toEqual(
+    [tour.id, ownTour.id].sort(),
+  );
+  for (let i = 0; i < 2; i++) {
+    expect(
+      (await graphql(remove, owner, { tour: tour.id, user: adminId })).data,
+    ).toEqual({ removeTourAdmin: true });
+  }
+  expect((await readTour(admin, tour.id)).errors?.[0]?.extensions.code).toBe(
+    'FORBIDDEN',
+  );
+  expect(
+    (await renameTour(admin, tour.id, 'No')).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (await graphql(list, admin, { tour: tour.id })).errors?.[0]?.extensions
+      .code,
+  ).toBe('FORBIDDEN');
+  expect((await myTours(admin)).data!.myTours).toEqual([ownTour]);
+  expect((await readTour(other, tour.id)).errors).toBeUndefined();
+  await graphql(remove, owner, { tour: tour.id, user: ownerId });
+  expect(
+    (await renameTour(owner, tour.id, 'Owner remains')).errors,
+  ).toBeUndefined();
+});

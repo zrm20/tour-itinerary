@@ -239,7 +239,7 @@ test.each(['firstName', 'lastName'] as const)(
     };
     const result = await updateOwnNames(token, input);
     expect(result.data?.updateOwnNames).toBeFalsy();
-    expect(result.errors?.[0]?.extensions.code).toBe('GRAPHQL_REQUEST_FAILED');
+    expect(result.errors?.[0]?.extensions.code).toBe('BAD_USER_INPUT');
     expect((await currentUser(token)).data!.currentUser).toMatchObject({
       firstName: 'Alexander',
       lastName: 'Jonas',
@@ -256,7 +256,7 @@ test('updateOwnNames rejects a blank preferred name when provided', async () => 
     preferredName: '  ',
   });
   expect(result.data?.updateOwnNames).toBeFalsy();
-  expect(result.errors?.[0]?.extensions.code).toBe('GRAPHQL_REQUEST_FAILED');
+  expect(result.errors?.[0]?.extensions.code).toBe('BAD_USER_INPUT');
 });
 
 test('updateOwnNames cannot change another user profile or login identity', async () => {

@@ -379,3 +379,174 @@ test('health and the infrastructure probe remain independent of organization acc
   // Probe may be null/failed without seed; ensure it does not require auth.
   expect(probe.errors?.[0]?.extensions.code).not.toBe('UNAUTHENTICATED');
 });
+
+async function userId(token: string) {
+  return (
+    await graphql<{ currentUser: { id: string } }>(
+      '{ currentUser { id } }',
+      token,
+    )
+  ).data!.currentUser.id;
+}
+
+async function owners(token: string | undefined, id: string) {
+  return graphql<{ organizationOwners: { id: string; displayName: string }[] }>(
+    'query ($id: ID!) { organizationOwners(organizationId: $id) { id displayName } }',
+    token,
+    { id },
+  );
+}
+
+async function changeOwner(
+  action: 'grant' | 'remove',
+  token: string | undefined,
+  id: string,
+  target: string,
+) {
+  return graphql<Record<string, boolean>>(
+    `mutation ($id: ID!, $target: ID!) { ${action}OrganizationOwner(organizationId: $id, userId: $target) }`,
+    token,
+    { id, target },
+  );
+}
+
+test('registered owners have equal authority and duplicate grants are idempotent', async () => {
+  const a = (await register('share-a@example.test', 'Alice', 'Owner'))
+    .access_token;
+  const b = (await register('share-b@example.test', 'Bob', 'Owner'))
+    .access_token;
+  const c = (await register('share-c@example.test', 'Charlie', 'Owner'))
+    .access_token;
+  const aId = await userId(a),
+    bId = await userId(b),
+    cId = await userId(c);
+  const org = (await createOrganization(a, 'Shared')).data!.createOrganization;
+  expect((await changeOwner('grant', a, org.id, bId)).errors).toBeUndefined();
+  expect((await changeOwner('grant', a, org.id, bId)).errors).toBeUndefined();
+  expect((await owners(b, org.id)).data!.organizationOwners).toEqual(
+    expect.arrayContaining([
+      { id: aId, displayName: 'Alice' },
+      { id: bId, displayName: 'Bob' },
+    ]),
+  );
+  expect((await owners(b, org.id)).data!.organizationOwners).toHaveLength(2);
+  expect((await myOrganizations(b)).data!.myOrganizations).toEqual([org]);
+  expect(
+    (await renameOrganization(b, org.id, 'Equal authority')).errors,
+  ).toBeUndefined();
+  expect((await changeOwner('grant', b, org.id, cId)).errors).toBeUndefined();
+  expect((await changeOwner('remove', b, org.id, aId)).errors).toBeUndefined();
+  expect((await organization(a, org.id)).errors?.[0]?.extensions.code).toBe(
+    'FORBIDDEN',
+  );
+  expect((await myOrganizations(a)).data!.myOrganizations).toEqual([]);
+  expect((await owners(a, org.id)).errors?.[0]?.extensions.code).toBe(
+    'FORBIDDEN',
+  );
+  expect(
+    (await renameOrganization(a, org.id, 'Removed owner')).errors?.[0]
+      ?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (await changeOwner('grant', a, org.id, aId)).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(
+    (await changeOwner('remove', a, org.id, bId)).errors?.[0]?.extensions.code,
+  ).toBe('FORBIDDEN');
+  expect(await userId(a)).toBe(aId);
+  expect((await changeOwner('remove', b, org.id, bId)).errors).toBeUndefined();
+  expect((await owners(c, org.id)).data!.organizationOwners).toEqual([
+    { id: cId, displayName: 'Charlie' },
+  ]);
+});
+
+test('last-owner protection survives sequential and concurrent self-removal', async () => {
+  const a = (await register('last-a@example.test', 'Last', 'Alpha'))
+    .access_token;
+  const b = (await register('last-b@example.test', 'Last', 'Beta'))
+    .access_token;
+  const aId = await userId(a),
+    bId = await userId(b);
+  const org = (await createOrganization(a, 'Always managed')).data!
+    .createOrganization;
+  expect(
+    (await changeOwner('remove', a, org.id, aId)).errors?.[0]?.extensions.code,
+  ).toBe('BAD_USER_INPUT');
+  expect((await changeOwner('grant', a, org.id, bId)).errors).toBeUndefined();
+  const outcomes = await Promise.all([
+    changeOwner('remove', a, org.id, aId),
+    changeOwner('remove', b, org.id, bId),
+  ]);
+  expect(outcomes.filter((result) => !result.errors)).toHaveLength(1);
+  expect(
+    outcomes.filter(
+      (result) => result.errors?.[0]?.extensions.code === 'BAD_USER_INPUT',
+    ),
+  ).toHaveLength(1);
+  const remainingToken = outcomes[0].errors ? a : b;
+  expect(
+    (await owners(remainingToken, org.id)).data!.organizationOwners,
+  ).toHaveLength(1);
+  expect(
+    (await organization(remainingToken, org.id)).data!.organization.id,
+  ).toBe(org.id);
+});
+
+test('ownership grants require a registered application user ID', async () => {
+  const token = (await register('target-owner@example.test', 'Target', 'Owner'))
+    .access_token;
+  const id = (await createOrganization(token, 'Registered targets')).data!
+    .createOrganization.id;
+  for (const target of [
+    'target-owner@example.test',
+    '00000000-0000-4000-8000-000000000000',
+  ]) {
+    expect(
+      (await changeOwner('grant', token, id, target)).errors?.[0]?.extensions
+        .code,
+    ).toBe('BAD_USER_INPUT');
+  }
+  expect((await owners(token, id)).data!.organizationOwners).toHaveLength(1);
+});
+
+test('nonowners and other organizations cannot list or manage protected owners', async () => {
+  const a = (await register('private-a@example.test', 'Private', 'Alpha'))
+    .access_token;
+  const b = (await register('private-b@example.test', 'Private', 'Beta'))
+    .access_token;
+  const aId = await userId(a),
+    bId = await userId(b);
+  const orgA = (await createOrganization(a, 'Private A')).data!
+    .createOrganization.id;
+  const orgB = (await createOrganization(b, 'Private B')).data!
+    .createOrganization.id;
+  for (const [token, id, target] of [
+    [a, orgB, bId],
+    [b, orgA, aId],
+  ] as const) {
+    expect((await owners(token, id)).errors?.[0]?.extensions.code).toBe(
+      'FORBIDDEN',
+    );
+    for (const action of ['grant', 'remove'] as const) {
+      expect(
+        (await changeOwner(action, token, id, target)).errors?.[0]?.extensions
+          .code,
+      ).toBe('FORBIDDEN');
+    }
+  }
+  expect((await owners(undefined, orgA)).errors?.[0]?.extensions.code).toBe(
+    'UNAUTHENTICATED',
+  );
+  for (const action of ['grant', 'remove'] as const) {
+    expect(
+      (await changeOwner(action, undefined, orgA, bId)).errors?.[0]?.extensions
+        .code,
+    ).toBe('UNAUTHENTICATED');
+  }
+  expect((await owners(a, orgA)).data!.organizationOwners).toEqual([
+    { id: aId, displayName: 'Private' },
+  ]);
+  expect((await owners(b, orgB)).data!.organizationOwners).toEqual([
+    { id: bId, displayName: 'Private' },
+  ]);
+});

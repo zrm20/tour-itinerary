@@ -1,10 +1,10 @@
-import { Database } from './persistence/database';
 import { join } from 'node:path';
 import { ApolloDriver, type ApolloDriverConfig } from '@nestjs/apollo';
 import { GraphQLModule } from '@nestjs/graphql';
 import { Module } from '@nestjs/common';
 import { AuthenticationModule } from '@nestjs/authentication';
 import { FixturePersistence } from './persistence/fixture-persistence';
+import { PersistenceModule } from './persistence/persistence.module';
 import { ProbeService } from './probe/probe.service';
 import { ProbeResolver } from './probe/probe.resolver';
 import { AuthConfig } from './authentication/auth.config';
@@ -15,10 +15,31 @@ import { IdentityProviderController } from './identity-provider/identity-provide
 import { AppConfig } from './app-config';
 import { AppConfigModule } from './app-config.module';
 import { HealthController } from './health.controller';
+import { OrganizationsModule } from './organizations/organizations.module';
+
+const safeError = (code: unknown) => {
+  if (code === 'INFRASTRUCTURE_PROBE_FAILED')
+    return {
+      code,
+      message: 'Infrastructure probe unavailable.',
+    } as const;
+  if (code === 'UNAUTHENTICATED')
+    return { code, message: 'Authentication required.' } as const;
+  if (code === 'FORBIDDEN')
+    return { code, message: 'Not authorized.' } as const;
+  if (code === 'BAD_USER_INPUT')
+    return { code, message: 'Invalid organization name.' } as const;
+  return {
+    code: 'GRAPHQL_REQUEST_FAILED' as const,
+    message: 'GraphQL request failed.',
+  };
+};
 
 @Module({
   imports: [
     AppConfigModule,
+    PersistenceModule,
+    OrganizationsModule,
     AuthenticationModule.forRoot(),
     GraphQLModule.forRootAsync<ApolloDriverConfig>({
       driver: ApolloDriver,
@@ -29,21 +50,12 @@ import { HealthController } from './health.controller';
         playground: config.graphqlPlayground,
         includeStacktraceInErrorResponses: false,
         formatError: (error) => {
-          const code = error.extensions?.code;
-          const safeCode =
-            code === 'INFRASTRUCTURE_PROBE_FAILED' || code === 'UNAUTHENTICATED'
-              ? code
-              : 'GRAPHQL_REQUEST_FAILED';
+          const { code, message } = safeError(error.extensions?.code);
           return {
-            message:
-              safeCode === 'INFRASTRUCTURE_PROBE_FAILED'
-                ? 'Infrastructure probe unavailable.'
-                : safeCode === 'UNAUTHENTICATED'
-                  ? 'Authentication required.'
-                  : 'GraphQL request failed.',
+            message,
             ...(error.locations ? { locations: error.locations } : {}),
             ...(error.path ? { path: error.path } : {}),
-            extensions: { code: safeCode },
+            extensions: { code },
           };
         },
       }),
@@ -51,7 +63,6 @@ import { HealthController } from './health.controller';
   ],
   controllers: [HealthController, IdentityProviderController],
   providers: [
-    Database,
     AuthConfig,
     UsersService,
     ApiBearerProvider,

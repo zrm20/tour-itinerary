@@ -10,12 +10,13 @@ import {
   authorizationRequest,
   callbackCode,
   exchangeCode,
+  signIn,
+  signOut,
   type TokenSet,
 } from '../scripts/oidc-client.mjs';
 import { generateKeyPair, exportJWK, SignJWT, decodeJwt } from 'jose';
 import { symmetricEncrypt } from 'better-auth/crypto';
 import pg from 'pg';
-import { signIn } from '../scripts/oidc-client.mjs';
 import { provisionOidc } from '../scripts/auth-setup.mjs';
 let database: Awaited<ReturnType<typeof authDatabase>>;
 let issuer: string;
@@ -514,6 +515,103 @@ test('OIDC discovery publishes the configured issuer and real protocol endpoints
     authorization_endpoint: `${issuer}/oauth2/authorize`,
     token_endpoint: `${issuer}/oauth2/token`,
     jwks_uri: `${issuer}/jwks`,
+    end_session_endpoint: `${issuer}/oauth2/end-session`,
     code_challenge_methods_supported: ['S256'],
   });
+});
+
+/** Complete OIDC sign-in while retaining the provider session cookie. */
+async function signInWithSession() {
+  const request = authorizationRequest(options());
+  const authorize = await fetch(request.url, {
+    redirect: 'manual',
+    headers: { accept: 'text/html' },
+    signal: AbortSignal.timeout(10000),
+  });
+  const login =
+    authorize.headers.get('location') ??
+    (authorize.ok
+      ? ((await authorize.json()) as { url: string }).url
+      : undefined);
+  if (typeof login !== 'string') throw new Error('missing login redirect');
+  const loginUrl = new URL(login, issuer);
+  const signedIn = await post('/sign-in/email', {
+    ...credentials,
+    oauth_query: loginUrl.search.slice(1),
+  });
+  expect(signedIn.ok).toBe(true);
+  const cookie = signedIn.headers
+    .getSetCookie()
+    .find((value) => value.startsWith('better-auth.session_token='));
+  expect(cookie).toBeTruthy();
+  const result = (await signedIn.json()) as { url: string };
+  const tokens = await exchangeCode(request, callbackCode(result.url, request));
+  return {
+    tokens,
+    cookie: cookie!.split(';', 1)[0]!,
+  };
+}
+
+async function authorizeWithSession(cookie: string) {
+  const request = authorizationRequest(options());
+  const response = await fetch(request.url, {
+    redirect: 'manual',
+    headers: { accept: 'application/json', cookie },
+    signal: AbortSignal.timeout(10000),
+  });
+  return { request, response };
+}
+
+test('current-session sign-out ends that provider session without ending another, while an issued JWT remains usable until expiry', async () => {
+  const first = await signInWithSession();
+  const second = await signInWithSession();
+  expect(
+    (await currentUser(first.tokens.access_token)).data?.currentUser,
+  ).toBeTruthy();
+  expect(
+    (await currentUser(second.tokens.access_token)).data?.currentUser,
+  ).toBeTruthy();
+
+  await signOut(options(), { idToken: first.tokens.id_token });
+
+  const ended = await authorizeWithSession(first.cookie);
+  expect(ended.response.ok || ended.response.status === 302).toBe(true);
+  const endedBody = ended.response.headers.get('location')
+    ? ended.response.headers.get('location')!
+    : ((await ended.response.json()) as { url?: string }).url;
+  expect(endedBody).toBeTruthy();
+  expect(new URL(endedBody!, issuer).pathname).toBe('/auth/login');
+
+  const surviving = await authorizeWithSession(second.cookie);
+  expect(surviving.response.ok).toBe(true);
+  const survivingBody = (await surviving.response.json()) as { url: string };
+  const renewed = await exchangeCode(
+    surviving.request,
+    callbackCode(survivingBody.url, surviving.request),
+  );
+  expect(
+    (await currentUser(renewed.access_token)).data?.currentUser,
+  ).toBeTruthy();
+  expect(renewed.refresh_token).toBeUndefined();
+
+  expect(
+    (await currentUser(first.tokens.access_token)).data?.currentUser,
+  ).toBeTruthy();
+  expect(
+    (await currentUser(renewed.access_token)).data?.currentUser,
+  ).toBeTruthy();
+  await new Promise((resolve) => setTimeout(resolve, 2100));
+  expect(
+    (await currentUser(first.tokens.access_token)).errors?.[0]?.extensions.code,
+  ).toBe('UNAUTHENTICATED');
+  const stillAlive = await authorizeWithSession(second.cookie);
+  expect(stillAlive.response.ok).toBe(true);
+  const stillBody = (await stillAlive.response.json()) as { url: string };
+  const afterExpiry = await exchangeCode(
+    stillAlive.request,
+    callbackCode(stillBody.url, stillAlive.request),
+  );
+  expect(
+    (await currentUser(afterExpiry.access_token)).data?.currentUser,
+  ).toBeTruthy();
 });

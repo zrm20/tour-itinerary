@@ -33,3 +33,7 @@ export function signIn(
   options: OidcOptions,
   credentials: { email: string; password: string },
 ): Promise<TokenSet>;
+export function signOut(
+  options: OidcOptions,
+  hint: { idToken: string },
+): Promise<void>;

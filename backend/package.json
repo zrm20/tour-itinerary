@@ -31,7 +31,8 @@
     "db:shared-seed": "node scripts/database.mjs shared-seed",
     "auth:setup": "node --env-file-if-exists=.env scripts/auth-setup.mjs",
     "auth:register": "node --env-file-if-exists=.env scripts/oidc-client.mjs register",
-    "auth:signin": "node --env-file-if-exists=.env scripts/oidc-client.mjs"
+    "auth:signin": "node --env-file-if-exists=.env scripts/oidc-client.mjs",
+    "auth:signout": "node --env-file-if-exists=.env scripts/oidc-client.mjs signout"
   },
   "dependencies": {
     "@apollo/server": "5.5.1",

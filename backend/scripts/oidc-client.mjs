@@ -105,10 +105,25 @@ export async function signIn(options, { email, password }) {
   return exchangeCode(request, code);
 }
 
+/** End the provider session identified by the ID token via RP-initiated logout. */
+export async function signOut(options, { idToken }) {
+  const response = await fetch(`${options.issuer}/oauth2/end-session`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: options.clientId,
+      id_token_hint: idToken,
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error('OIDC sign-out rejected');
+  await response.body?.cancel();
+}
+
 async function main() {
   const mode = process.argv[2] ?? 'signin';
-  if (!['signin', 'register'].includes(mode))
-    throw new Error('Use auth:signin or auth:register');
+  if (!['signin', 'register', 'signout'].includes(mode))
+    throw new Error('Use auth:signin, auth:register, or auth:signout');
   const issuer = process.env.AUTH_ISSUER;
   if (!issuer) throw new Error('AUTH_ISSUER is required');
   const register = mode === 'register';
@@ -118,6 +133,12 @@ async function main() {
   )
     throw new Error('OIDC_CLIENT_ID and OIDC_CALLBACK_URL are required');
   const account = await accountInput(register);
+  const oidc = {
+    issuer,
+    audience: process.env.API_AUDIENCE ?? 'urn:tour-itinerary:api',
+    clientId: process.env.OIDC_CLIENT_ID,
+    callback: process.env.OIDC_CALLBACK_URL,
+  };
   if (register) {
     console.log('Registering account…');
     const response = await fetch(`${issuer}/sign-up/email`, {
@@ -141,16 +162,17 @@ async function main() {
     );
     return;
   }
+  if (mode === 'signout') {
+    console.log('Signing in to end the current provider session…');
+    const tokens = await signIn(oidc, account);
+    await signOut(oidc, { idToken: tokens.id_token });
+    console.log(
+      'Signed out of the current session. Local tokens were discarded; an already-issued access token may remain usable until expiry.',
+    );
+    return;
+  }
   console.log('Signing in and loading your profile…');
-  const tokens = await signIn(
-    {
-      issuer,
-      audience: process.env.API_AUDIENCE ?? 'urn:tour-itinerary:api',
-      clientId: process.env.OIDC_CLIENT_ID,
-      callback: process.env.OIDC_CALLBACK_URL,
-    },
-    account,
-  );
+  const tokens = await signIn(oidc, account);
   const response = await fetch(`${new URL(issuer).origin}/graphql`, {
     method: 'POST',
     headers: {
@@ -177,14 +199,21 @@ if (process.argv[1]?.endsWith('/oidc-client.mjs')) {
       message.endsWith(' is required without an interactive terminal') ||
       message === 'AUTH_ISSUER is required' ||
       message === 'OIDC_CLIENT_ID and OIDC_CALLBACK_URL are required' ||
-      message === 'Use auth:signin or auth:register'
+      message === 'Use auth:signin, auth:register, or auth:signout'
     )
       console.error(message);
     else if (error?.name === 'AbortError') console.error('Cancelled.');
-    else
+    else {
+      const action =
+        process.argv[2] === 'register'
+          ? 'registration'
+          : process.argv[2] === 'signout'
+            ? 'sign-out'
+            : 'sign-in';
       console.error(
-        `OIDC ${process.argv[2] === 'register' ? 'registration' : 'sign-in'} failed; tokens and credentials were not saved`,
+        `OIDC ${action} failed; tokens and credentials were not saved`,
       );
+    }
     process.exitCode = 1;
   });
 }

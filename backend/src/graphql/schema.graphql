@@ -6,6 +6,17 @@ type User {
   preferredName: String
   displayName: String!
 }
+
+input UpdateOwnNamesInput {
+  firstName: String!
+  lastName: String!
+  preferredName: String
+}
+
 extend type Query {
   currentUser: User!
+}
+
+type Mutation {
+  updateOwnNames(input: UpdateOwnNamesInput!): User!
 }

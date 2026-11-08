@@ -5,6 +5,10 @@ import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import { AppModule } from '../src/app.module';
 
 import { createServer } from 'node:net';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { authDatabase } from './fixtures/auth-database';
 import {
   authorizationRequest,
@@ -561,6 +565,117 @@ async function authorizeWithSession(cookie: string) {
   });
   return { request, response };
 }
+
+async function runCli(
+  mode: string,
+  sessionFile: string,
+  account: Record<string, string> = {},
+) {
+  const env = { ...process.env };
+  for (const key of Object.keys(env))
+    if (key.startsWith('OIDC_')) delete env[key];
+  const child = spawn(process.execPath, ['scripts/oidc-client.mjs', mode], {
+    env: {
+      ...env,
+      AUTH_ISSUER: issuer,
+      OIDC_CLIENT_ID: options().clientId,
+      OIDC_CALLBACK_URL: options().callback,
+      OIDC_SESSION_FILE: sessionFile,
+      ...account,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  child.stdin.end();
+  let output = '';
+  child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()));
+  child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()));
+  const code = await new Promise<number | null>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+  return { code, output };
+}
+
+test('CLI sign-out ends the saved session without credentials or a new sign-in, preserving another session', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'oidc-cli-'));
+  const sessionFile = join(directory, 'session.json');
+  try {
+    const first = await signInWithSession();
+    const second = await signInWithSession();
+    await writeFile(
+      sessionFile,
+      JSON.stringify({
+        issuer,
+        clientId: options().clientId,
+        idToken: first.tokens.id_token,
+      }),
+      { mode: 0o600 },
+    );
+    const result = await runCli('signout', sessionFile);
+    expect(result.code, result.output).toBe(0);
+    expect(result.output).toContain('Signed out of the current session');
+    expect(result.output).not.toContain(first.tokens.id_token);
+    await expect(stat(sessionFile)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const ended = await authorizeWithSession(first.cookie);
+    const location =
+      ended.response.headers.get('location') ??
+      ((await ended.response.json()) as { url: string }).url;
+    expect(new URL(location, issuer).pathname).toBe('/auth/login');
+    const surviving = await authorizeWithSession(second.cookie);
+    const body = (await surviving.response.json()) as { url: string };
+    const tokens = await exchangeCode(
+      surviving.request,
+      callbackCode(body.url, surviving.request),
+    );
+    expect(
+      (await currentUser(tokens.access_token)).data?.currentUser,
+    ).toBeTruthy();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('CLI sign-in saves only a private logout handle and refuses to overwrite a live session', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'oidc-cli-'));
+  const sessionFile = join(directory, 'session.json');
+  try {
+    const result = await runCli('signin', sessionFile, {
+      OIDC_EMAIL: credentials.email,
+      OIDC_PASSWORD: credentials.password,
+    });
+    expect(result.code, result.output).toBe(0);
+    expect(result.output).toContain(credentials.email);
+    const saved = JSON.parse(await readFile(sessionFile, 'utf8')) as {
+      issuer: string;
+      clientId: string;
+      idToken: string;
+    };
+    expect(Object.keys(saved).sort()).toEqual([
+      'clientId',
+      'idToken',
+      'issuer',
+    ]);
+    expect(saved.issuer).toBe(issuer);
+    expect(saved.clientId).toBe(options().clientId);
+    expect(decodeJwt(saved.idToken)).toMatchObject({
+      iss: issuer,
+      aud: options().clientId,
+    });
+    expect((await stat(sessionFile)).mode & 0o777).toBe(0o600);
+    expect(result.output).not.toContain(saved.idToken);
+    expect(result.output).not.toContain(credentials.password);
+    const repeated = await runCli('signin', sessionFile);
+    expect(repeated.code).toBe(1);
+    expect(repeated.output).toContain('Run auth:signout first');
+    expect(await readFile(sessionFile, 'utf8')).toBe(JSON.stringify(saved));
+    const logout = await runCli('signout', sessionFile);
+    expect(logout.code, logout.output).toBe(0);
+    await expect(stat(sessionFile)).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('current-session sign-out ends that provider session without ending another, while an issued JWT remains usable until expiry', async () => {
   const first = await signInWithSession();

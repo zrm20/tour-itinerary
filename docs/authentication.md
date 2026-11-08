@@ -126,3 +126,36 @@ ownership intact. Assignments reference permanent application user IDs and remai
 independent of ownership. Revocation changes the next request with the same valid
 access token. Admin-assignment changes serialize on the organization row with
 ownership changes and recheck the actor's authority after obtaining the lock.
+
+## Read-only tour members
+
+Owners and assigned tour admins grant registered users read-only access with
+`grantTourMember(tourId, userId)` and remove assignments with
+`removeTourMember(tourId, userId)`. `tourAccess` returns `ADMIN` or `MEMBER`.
+Members can read their tour and see it in `myTours`, but cannot rename it, list
+assignments, manage access, or manage the organization. Access never extends to
+sibling tours. A user may administer one tour and be a member of another.
+
+Owners can replace either assigned role by granting the other role. There is
+one assignment per user/tour. Member-management operations let owners remove
+any assignment; admins can only grant/remove members and cannot overwrite or
+remove a current admin, including themselves. Admin-specific mutations remain
+owner-only. Repeated grants/removals are safe. Unknown grant targets return
+`BAD_USER_INPUT`; unauthorized or unknown tours return `FORBIDDEN`.
+
+```graphql
+mutation {
+  grantTourMember(tourId: "tour-id", userId: "permanent-application-user-id") {
+    userId
+    role
+  }
+}
+```
+
+All access mutations serialize with ownership changes on the organization row,
+then check current actor authority and the target's current assigned role.
+Role replacements and removals affect the next API request using the same valid
+bearer token. Ownership grants/removals preserve assigned roles: after ownership
+removal, an assigned admin retains admin authority, an assigned member retains
+read-only access, and an unassigned former owner loses tour access. Profile name
+changes preserve both ownership and tour assignments.

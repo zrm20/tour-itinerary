@@ -67,9 +67,9 @@ export async function provisionOidc(
       [randomUUID(), audience],
     );
     await client.query(
-      `INSERT INTO "auth_oauthClient" (id, "clientId", name, "skipConsent", "requirePKCE", "tokenEndpointAuthMethod", "applicationType", scopes, "grantTypes", "responseTypes", "redirectUris", "createdAt", "updatedAt")
-      VALUES ($1, $2, 'Local CLI', true, true, 'none', 'native', ARRAY['openid','profile','email'], ARRAY['authorization_code'], ARRAY['code'], ARRAY[$3]::text[], now(), now())
-      ON CONFLICT ("clientId") DO UPDATE SET "redirectUris" = EXCLUDED."redirectUris", "requirePKCE" = true, "skipConsent" = true, "tokenEndpointAuthMethod" = 'none', "applicationType" = 'native', scopes = EXCLUDED.scopes, "grantTypes" = EXCLUDED."grantTypes", "responseTypes" = EXCLUDED."responseTypes", "updatedAt" = now()`,
+      `INSERT INTO "auth_oauthClient" (id, "clientId", name, "skipConsent", "enableEndSession", "requirePKCE", "tokenEndpointAuthMethod", "applicationType", scopes, "grantTypes", "responseTypes", "redirectUris", "postLogoutRedirectUris", "createdAt", "updatedAt")
+      VALUES ($1, $2, 'Local CLI', true, true, true, 'none', 'native', ARRAY['openid','profile','email'], ARRAY['authorization_code'], ARRAY['code'], ARRAY[$3]::text[], ARRAY[$3]::text[], now(), now())
+      ON CONFLICT ("clientId") DO UPDATE SET "redirectUris" = EXCLUDED."redirectUris", "postLogoutRedirectUris" = EXCLUDED."postLogoutRedirectUris", "enableEndSession" = true, "requirePKCE" = true, "skipConsent" = true, "tokenEndpointAuthMethod" = 'none', "applicationType" = 'native', scopes = EXCLUDED.scopes, "grantTypes" = EXCLUDED."grantTypes", "responseTypes" = EXCLUDED."responseTypes", "updatedAt" = now()`,
       [randomUUID(), clientId, callback],
     );
     await client.query(

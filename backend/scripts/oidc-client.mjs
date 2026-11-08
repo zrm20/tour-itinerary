@@ -1,5 +1,8 @@
 import { URLSearchParams } from 'node:url';
 import { createHash, randomBytes } from 'node:crypto';
+import { constants } from 'node:fs';
+import { open, unlink } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { accountInput } from './auth-prompts.mjs';
 
 export function authorizationRequest({ issuer, audience, clientId, callback }) {
@@ -105,10 +108,64 @@ export async function signIn(options, { email, password }) {
   return exchangeCode(request, code);
 }
 
+/** End the provider session identified by the ID token via RP-initiated logout. */
+export async function signOut(options, { idToken }) {
+  const response = await fetch(`${options.issuer}/oauth2/end-session`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: options.clientId,
+      id_token_hint: idToken,
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error('OIDC sign-out rejected');
+  await response.body?.cancel();
+}
+
+class SessionFileError extends Error {}
+
+async function readSession(path, options) {
+  let file;
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (error.code === 'ENOENT')
+      throw new SessionFileError(
+        'No saved CLI session. Run auth:signin first.',
+      );
+    throw error;
+  }
+  try {
+    const info = await file.stat();
+    if (
+      !info.isFile() ||
+      (info.mode & 0o077) !== 0 ||
+      (process.getuid && info.uid !== process.getuid())
+    )
+      throw new SessionFileError(
+        'Session file must be private and owned by the current user (mode 0600).',
+      );
+    const session = JSON.parse(await file.readFile('utf8'));
+    if (
+      session.issuer !== options.issuer ||
+      session.clientId !== options.clientId
+    )
+      throw new SessionFileError(
+        'Saved CLI session does not match AUTH_ISSUER and OIDC_CLIENT_ID.',
+      );
+    if (typeof session.idToken !== 'string' || !session.idToken)
+      throw new SessionFileError('Saved CLI session has no logout handle.');
+    return session;
+  } finally {
+    await file.close();
+  }
+}
+
 async function main() {
   const mode = process.argv[2] ?? 'signin';
-  if (!['signin', 'register'].includes(mode))
-    throw new Error('Use auth:signin or auth:register');
+  if (!['signin', 'register', 'signout'].includes(mode))
+    throw new Error('Use auth:signin, auth:register, or auth:signout');
   const issuer = process.env.AUTH_ISSUER;
   if (!issuer) throw new Error('AUTH_ISSUER is required');
   const register = mode === 'register';
@@ -117,8 +174,14 @@ async function main() {
     (!process.env.OIDC_CLIENT_ID || !process.env.OIDC_CALLBACK_URL)
   )
     throw new Error('OIDC_CLIENT_ID and OIDC_CALLBACK_URL are required');
-  const account = await accountInput(register);
+  const oidc = {
+    issuer,
+    audience: process.env.API_AUDIENCE ?? 'urn:tour-itinerary:api',
+    clientId: process.env.OIDC_CLIENT_ID,
+    callback: process.env.OIDC_CALLBACK_URL,
+  };
   if (register) {
+    const account = await accountInput(true);
     console.log('Registering account…');
     const response = await fetch(`${issuer}/sign-up/email`, {
       method: 'POST',
@@ -141,32 +204,79 @@ async function main() {
     );
     return;
   }
-  console.log('Signing in and loading your profile…');
-  const tokens = await signIn(
-    {
-      issuer,
-      audience: process.env.API_AUDIENCE ?? 'urn:tour-itinerary:api',
-      clientId: process.env.OIDC_CLIENT_ID,
-      callback: process.env.OIDC_CALLBACK_URL,
-    },
-    account,
+  const sessionPath = resolve(
+    process.env.OIDC_SESSION_FILE ?? '.oidc-session.json',
   );
-  const response = await fetch(`${new URL(issuer).origin}/graphql`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${tokens.access_token}`,
-    },
-    body: JSON.stringify({
-      query:
-        '{ currentUser { id email firstName lastName preferredName displayName } }',
-    }),
-    signal: AbortSignal.timeout(10000),
-  });
-  const result = await response.json();
-  if (!response.ok || result.errors)
-    throw new Error('Current-user request failed');
-  console.log(JSON.stringify(result.data.currentUser, null, 2));
+  if (mode === 'signout') {
+    const session = await readSession(sessionPath, oidc);
+    console.log('Ending the saved provider session…');
+    await signOut(oidc, { idToken: session.idToken });
+    await unlink(sessionPath);
+    console.log(
+      'Signed out of the current session. Local tokens were discarded; an already-issued access token may remain usable until expiry.',
+    );
+    return;
+  }
+  // Reserve the path before authenticating so repeated/concurrent commands
+  // cannot replace a live session's logout handle.
+  let sessionFile;
+  try {
+    sessionFile = await open(sessionPath, 'wx', 0o600);
+  } catch (error) {
+    if (error.code === 'EEXIST')
+      throw new SessionFileError(
+        'A CLI session file already exists. Run auth:signout first or choose another OIDC_SESSION_FILE.',
+      );
+    throw error;
+  }
+  let tokens;
+  let saved = false;
+  try {
+    const account = await accountInput(false);
+    console.log('Signing in and loading your profile…');
+    tokens = await signIn(oidc, account);
+    await sessionFile.writeFile(
+      JSON.stringify({
+        issuer: oidc.issuer,
+        clientId: oidc.clientId,
+        idToken: tokens.id_token,
+      }),
+    );
+    saved = true;
+    const response = await fetch(`${new URL(issuer).origin}/graphql`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${tokens.access_token}`,
+      },
+      body: JSON.stringify({
+        query:
+          '{ currentUser { id email firstName lastName preferredName displayName } }',
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const result = await response.json();
+    if (!response.ok || result.errors)
+      throw new Error('Current-user request failed');
+    console.log(JSON.stringify(result.data.currentUser, null, 2));
+    console.log(
+      'Session saved privately. Run npm run auth:signout with the same OIDC_SESSION_FILE to end it.',
+    );
+  } finally {
+    await sessionFile.close();
+    if (!saved) {
+      if (tokens) {
+        try {
+          await signOut(oidc, { idToken: tokens.id_token });
+        } catch {
+          console.error(
+            'Could not end the provider session after failing to save its logout handle.',
+          );
+        }
+      }
+      await unlink(sessionPath);
+    }
+  }
 }
 
 if (process.argv[1]?.endsWith('/oidc-client.mjs')) {
@@ -174,17 +284,25 @@ if (process.argv[1]?.endsWith('/oidc-client.mjs')) {
     // Missing configuration is actionable; provider/network diagnostics stay private.
     const message = error instanceof Error ? error.message : '';
     if (
+      error instanceof SessionFileError ||
       message.endsWith(' is required without an interactive terminal') ||
       message === 'AUTH_ISSUER is required' ||
       message === 'OIDC_CLIENT_ID and OIDC_CALLBACK_URL are required' ||
-      message === 'Use auth:signin or auth:register'
+      message === 'Use auth:signin, auth:register, or auth:signout'
     )
       console.error(message);
     else if (error?.name === 'AbortError') console.error('Cancelled.');
-    else
+    else {
+      const action =
+        process.argv[2] === 'register'
+          ? 'registration'
+          : process.argv[2] === 'signout'
+            ? 'sign-out'
+            : 'sign-in';
       console.error(
-        `OIDC ${process.argv[2] === 'register' ? 'registration' : 'sign-in'} failed; tokens and credentials were not saved`,
+        `OIDC ${action} failed; credentials and tokens were not printed. Any saved session was retained for auth:signout.`,
       );
+    }
     process.exitCode = 1;
   });
 }

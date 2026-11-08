@@ -253,21 +253,44 @@ model OauthClientAssertion {
 }
 
 model ApplicationUser {
- id String @id @default(uuid())
- email String
- firstName String
- lastName String
- preferredName String?
- identities ProviderIdentity[]
- @@map("application_user")
+  id            String              @id @default(uuid())
+  email         String
+  firstName     String
+  lastName      String
+  preferredName String?
+  identities    ProviderIdentity[]
+  ownerships    OrganizationOwner[]
+
+  @@map("application_user")
 }
+
 model ProviderIdentity {
- id String @id @default(uuid())
- issuer String
- subject String
- userId String
- user ApplicationUser @relation(fields: [userId], references: [id], onDelete: Restrict)
- @@unique([issuer, subject])
- @@index([userId])
- @@map("provider_identity")
+  id     String          @id @default(uuid())
+  issuer String
+  subject String
+  userId String
+  user   ApplicationUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([issuer, subject])
+  @@index([userId])
+  @@map("provider_identity")
+}
+
+model Organization {
+  id     String              @id @default(uuid())
+  name   String
+  owners OrganizationOwner[]
+
+  @@map("organization")
+}
+
+model OrganizationOwner {
+  organizationId String
+  userId         String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user           ApplicationUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@id([organizationId, userId])
+  @@index([userId])
+  @@map("organization_owner")
 }

@@ -11,6 +11,7 @@ beforeEach(() => {
   vi.stubEnv('PORT', undefined);
   vi.stubEnv('COMMIT_SHA', undefined);
   vi.stubEnv('DATABASE_URL', undefined);
+  vi.stubEnv('AUTH_ISSUER', undefined);
   vi.stubEnv('GRAPHQL_PLAYGROUND', undefined);
 });
 

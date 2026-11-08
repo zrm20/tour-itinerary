@@ -4,6 +4,7 @@
 **/.vitest/
 **/*.tsbuildinfo
 **/.env
+**/.oidc-session*.json
 **/.env.*
 !**/.env.example
 **/.terraform/

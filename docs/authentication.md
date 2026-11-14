@@ -79,7 +79,9 @@ mutation {
 
 ID tokens and provider session tokens are rejected as API access tokens. Health and the infrastructure probe remain public. Leaving `AUTH_ISSUER` unset disables authentication and retains database-free startup and health. No startup or ordinary read migrates, seeds or provisions authentication.
 
-Authenticated users can create named organizations, list and read organizations they own, and rename an owned organization through schema-first GraphQL. Creation atomically records the permanent application user as the first organization owner. Organization names are not unique. Ownership is a user-to-organization association keyed by application user ID, never email or provider session records. Unauthenticated callers and nonowners cannot read or rename unrelated organizations.
+Authenticated users can create named organizations, list and read organizations they own, and rename an owned organization through schema-first GraphQL. Creation atomically records the permanent application user as the first organization owner. Organization names are not unique. Ownership is a user-to-organization association keyed by application user ID, never email or provider session records. Unauthenticated callers and nonowners cannot read or rename unrelated organizations. Owners can list owners with `organizationOwners(organizationId: ID!)`, grant ownership with `grantOrganizationOwner(organizationId: ID!, userId: ID!)`, and relinquish or remove it with `removeOrganizationOwner(organizationId: ID!, userId: ID!)`. Mutations return `true` on success; repeated grants and removing an absent association are idempotent. Targets for grants must already be registered application user IDs; email addresses and invitations are not supported. Owner lists expose permanent IDs and profile display names. Every owner has equal authority, including over ownership. Nonowners cannot inspect owner lists or manage ownership.
+
+Ownership mutations lock the organization's database row and recheck the caller's current ownership inside the transaction. A removal is rejected with `BAD_USER_INPUT` if it would remove the final owner, including concurrent attempts. Grants/removals take effect on the next organization request with the same valid bearer token. Removing ownership does not delete the user or change any separately assigned tour role.
 
 ## Browser sign-in and Postman
 
@@ -124,4 +126,67 @@ Keep secrets out of plans, state, workflow variables, logs and issues. Changing 
 
 ## Verification
 
-Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts test/login-page.spec.ts test/update-own-names.spec.ts test/organizations.spec.ts`. Production image health checks remain independent of database and authentication secrets.
+Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts test/login-page.spec.ts test/update-own-names.spec.ts test/organizations.spec.ts test/tours.spec.ts`. Production image health checks remain independent of database and authentication secrets.
+
+## Tours owned by organizations
+
+Organization owners can create tours with `createTour(organizationId, name)`,
+read one with `tour(id)`, list accessible tours with `myTours`, and rename one
+with `renameTour(id, name)`. A `Tour` returns `id`, `name`, and `organizationId`.
+Names are trimmed and must contain a non-whitespace character; names can repeat
+within an organization. Tours require no dates or administrator assignment.
+Every operation checks current organization ownership from application data,
+including direct-ID reads and mutations. Unknown and inaccessible targets both
+return `FORBIDDEN`. Ownership grants authority over every tour in that organization.
+
+## Assigned tour admins
+
+An organization owner grants admin access to a registered application user with
+`grantTourAdmin(tourId, userId)` and removes it with
+`removeTourAdmin(tourId, userId)`. Repeated grants preserve one assignment per
+user/tour; repeated removals succeed. Unknown grant targets return `BAD_USER_INPUT`.
+Owners and assigned admins can list assignments with `tourAccess(tourId)`, which
+returns `tourId`, `userId`, and `role` (`ADMIN`). Only owners can change admin
+assignments, including an admin's own assignment.
+
+Assigned admins can read and rename that tour, and `myTours` combines their
+assigned tours with tours available through ownership without duplicates. The
+assignment grants no sibling-tour or organization authority. Owners retain full
+tour authority without an explicit assignment; removing their assignment leaves
+ownership intact. Assignments reference permanent application user IDs and remain
+independent of ownership. Revocation changes the next request with the same valid
+access token. Admin-assignment changes serialize on the organization row with
+ownership changes and recheck the actor's authority after obtaining the lock.
+
+## Read-only tour members
+
+Owners and assigned tour admins grant registered users read-only access with
+`grantTourMember(tourId, userId)` and remove assignments with
+`removeTourMember(tourId, userId)`. `tourAccess` returns `ADMIN` or `MEMBER`.
+Members can read their tour and see it in `myTours`, but cannot rename it, list
+assignments, manage access, or manage the organization. Access never extends to
+sibling tours. A user may administer one tour and be a member of another.
+
+Owners can replace either assigned role by granting the other role. There is
+one assignment per user/tour. Member-management operations let owners remove
+any assignment; admins can only grant/remove members and cannot overwrite or
+remove a current admin, including themselves. Admin-specific mutations remain
+owner-only. Repeated grants/removals are safe. Unknown grant targets return
+`BAD_USER_INPUT`; unauthorized or unknown tours return `FORBIDDEN`.
+
+```graphql
+mutation {
+  grantTourMember(tourId: "tour-id", userId: "permanent-application-user-id") {
+    userId
+    role
+  }
+}
+```
+
+All access mutations serialize with ownership changes on the organization row,
+then check current actor authority and the target's current assigned role.
+Role replacements and removals affect the next API request using the same valid
+bearer token. Ownership grants/removals preserve assigned roles: after ownership
+removal, an assigned admin retains admin authority, an assigned member retains
+read-only access, and an unassigned former owner loses tour access. Profile name
+changes preserve both ownership and tour assignments.

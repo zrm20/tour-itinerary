@@ -11,16 +11,27 @@ import { GraphQLError } from 'graphql';
 import type { User } from '../generated/graphql';
 import {
   InvalidOrganizationName,
+  InvalidOwnershipChange,
   OrganizationAccessDenied,
   OrganizationsService,
 } from './organizations.service';
 
-@Catch(InvalidOrganizationName, OrganizationAccessDenied)
+@Catch(
+  InvalidOrganizationName,
+  InvalidOwnershipChange,
+  OrganizationAccessDenied,
+)
 class OrganizationErrorFilter implements GqlExceptionFilter {
   catch(
-    error: InvalidOrganizationName | OrganizationAccessDenied,
+    error:
+      | InvalidOrganizationName
+      | InvalidOwnershipChange
+      | OrganizationAccessDenied,
   ): GraphQLError {
-    if (error instanceof InvalidOrganizationName) {
+    if (
+      error instanceof InvalidOrganizationName ||
+      error instanceof InvalidOwnershipChange
+    ) {
       return new GraphQLError(error.message, {
         extensions: { code: 'BAD_USER_INPUT' },
       });
@@ -35,6 +46,32 @@ class OrganizationErrorFilter implements GqlExceptionFilter {
 @UseFilters(OrganizationErrorFilter)
 export class OrganizationsResolver {
   constructor(private readonly organizations: OrganizationsService) {}
+
+  @Query()
+  organizationOwners(
+    @CurrentUser() user: User,
+    @Args('organizationId') id: string,
+  ) {
+    return this.organizations.listOwners(user.id, id);
+  }
+
+  @Mutation()
+  grantOrganizationOwner(
+    @CurrentUser() user: User,
+    @Args('organizationId') id: string,
+    @Args('userId') targetId: string,
+  ) {
+    return this.organizations.changeOwner(user.id, id, targetId, true);
+  }
+
+  @Mutation()
+  removeOrganizationOwner(
+    @CurrentUser() user: User,
+    @Args('organizationId') id: string,
+    @Args('userId') targetId: string,
+  ) {
+    return this.organizations.changeOwner(user.id, id, targetId, false);
+  }
 
   @Query()
   myOrganizations(@CurrentUser() user: User) {

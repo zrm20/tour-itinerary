@@ -1,0 +1,1 @@
+ALTER TYPE "TourRole" ADD VALUE 'MEMBER';

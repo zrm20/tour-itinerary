@@ -1,0 +1,31 @@
+type Tour {
+  id: ID!
+  name: String!
+  organizationId: ID!
+}
+
+extend type Query {
+  tourAccess(tourId: ID!): [TourAccess!]!
+  myTours: [Tour!]!
+  tour(id: ID!): Tour!
+}
+
+extend type Mutation {
+  grantTourMember(tourId: ID!, userId: ID!): TourAccess!
+  removeTourMember(tourId: ID!, userId: ID!): Boolean!
+  grantTourAdmin(tourId: ID!, userId: ID!): TourAccess!
+  removeTourAdmin(tourId: ID!, userId: ID!): Boolean!
+  renameTour(id: ID!, name: String!): Tour!
+  createTour(organizationId: ID!, name: String!): Tour!
+}
+
+enum TourRole {
+  MEMBER
+  ADMIN
+}
+
+type TourAccess {
+  userId: ID!
+  tourId: ID!
+  role: TourRole!
+}

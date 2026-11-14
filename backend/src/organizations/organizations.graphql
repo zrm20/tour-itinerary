@@ -5,10 +5,18 @@ type Organization {
 
 extend type Query {
   myOrganizations: [Organization!]!
+  organizationOwners(organizationId: ID!): [OrganizationOwner!]!
   organization(id: ID!): Organization!
 }
 
 extend type Mutation {
+  grantOrganizationOwner(organizationId: ID!, userId: ID!): Boolean!
+  removeOrganizationOwner(organizationId: ID!, userId: ID!): Boolean!
   createOrganization(name: String!): Organization!
   renameOrganization(id: ID!, name: String!): Organization!
+}
+
+type OrganizationOwner {
+  id: ID!
+  displayName: String!
 }

@@ -6,7 +6,7 @@ import { symmetricEncrypt } from 'better-auth/crypto';
 /** Explicit, idempotent setup; never called by startup or ordinary reads. */
 export async function provisionOidc(
   connectionString,
-  { audience, clientId, callback, lifetime = 1800, secret },
+  { audience, clientId, callback, lifetime = 1800, secret, browser },
 ) {
   const redirect = new URL(callback);
   if (
@@ -25,6 +25,26 @@ export async function provisionOidc(
     new URL(audience).hash
   )
     throw new Error('Invalid explicit OIDC setup configuration');
+  if (browser) {
+    const url = new URL(browser.callback);
+    if (
+      !browser.clientId ||
+      browser.clientId === clientId ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      url.pathname !== '/graphql/auth/callback' ||
+      !(
+        url.protocol === 'https:' ||
+        (url.protocol === 'http:' &&
+          ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
+      )
+    )
+      throw new Error(
+        'GraphiQL requires a distinct client ID and HTTPS /graphql/auth/callback URL (HTTP loopback allowed)',
+      );
+  }
   const client = new pg.Client({
     connectionString,
     connectionTimeoutMillis: 5000,
@@ -66,16 +86,44 @@ export async function provisionOidc(
       ON CONFLICT (identifier) DO UPDATE SET "accessTokenTtl" = NULL, "signingAlgorithm" = 'RS256', "allowedScopes" = EXCLUDED."allowedScopes", "updatedAt" = now()`,
       [randomUUID(), audience],
     );
-    await client.query(
-      `INSERT INTO "auth_oauthClient" (id, "clientId", name, "skipConsent", "enableEndSession", "requirePKCE", "tokenEndpointAuthMethod", "applicationType", scopes, "grantTypes", "responseTypes", "redirectUris", "postLogoutRedirectUris", "createdAt", "updatedAt")
-      VALUES ($1, $2, 'Local CLI', true, true, true, 'none', 'native', ARRAY['openid','profile','email'], ARRAY['authorization_code'], ARRAY['code'], ARRAY[$3]::text[], ARRAY[$3]::text[], now(), now())
-      ON CONFLICT ("clientId") DO UPDATE SET "redirectUris" = EXCLUDED."redirectUris", "postLogoutRedirectUris" = EXCLUDED."postLogoutRedirectUris", "enableEndSession" = true, "requirePKCE" = true, "skipConsent" = true, "tokenEndpointAuthMethod" = 'none', "applicationType" = 'native', scopes = EXCLUDED.scopes, "grantTypes" = EXCLUDED."grantTypes", "responseTypes" = EXCLUDED."responseTypes", "updatedAt" = now()`,
-      [randomUUID(), clientId, callback],
-    );
-    await client.query(
-      `INSERT INTO "auth_oauthClientResource" (id, "clientId", "resourceId", "createdAt") VALUES ($1,$2,$3,now()) ON CONFLICT ("clientId","resourceId") DO NOTHING`,
-      [randomUUID(), clientId, audience],
-    );
+    const clients = [
+      {
+        clientId,
+        callback,
+        name: 'Local CLI',
+        type: 'native',
+        logout: callback,
+      },
+      ...(browser
+        ? [
+            {
+              ...browser,
+              name: 'GraphiQL',
+              type: 'web',
+              logout: `${new URL(browser.callback).origin}/graphql`,
+            },
+          ]
+        : []),
+    ];
+    for (const registration of clients) {
+      await client.query(
+        `INSERT INTO "auth_oauthClient" (id, "clientId", name, "skipConsent", "enableEndSession", "requirePKCE", "tokenEndpointAuthMethod", "applicationType", scopes, "grantTypes", "responseTypes", "redirectUris", "postLogoutRedirectUris", "createdAt", "updatedAt")
+        VALUES ($1, $2, $4, true, true, true, 'none', $5, ARRAY['openid','profile','email'], ARRAY['authorization_code'], ARRAY['code'], ARRAY[$3]::text[], ARRAY[$6]::text[], now(), now())
+        ON CONFLICT ("clientId") DO UPDATE SET "redirectUris" = EXCLUDED."redirectUris", "postLogoutRedirectUris" = EXCLUDED."postLogoutRedirectUris", "enableEndSession" = true, "requirePKCE" = true, "skipConsent" = true, "tokenEndpointAuthMethod" = 'none', "applicationType" = EXCLUDED."applicationType", scopes = EXCLUDED.scopes, "grantTypes" = EXCLUDED."grantTypes", "responseTypes" = EXCLUDED."responseTypes", "updatedAt" = now()`,
+        [
+          randomUUID(),
+          registration.clientId,
+          registration.callback,
+          registration.name,
+          registration.type,
+          registration.logout,
+        ],
+      );
+      await client.query(
+        `INSERT INTO "auth_oauthClientResource" (id, "clientId", "resourceId", "createdAt") VALUES ($1,$2,$3,now()) ON CONFLICT ("clientId","resourceId") DO NOTHING`,
+        [randomUUID(), registration.clientId, audience],
+      );
+    }
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -91,6 +139,12 @@ if (process.argv[1]?.endsWith('/auth-setup.mjs')) {
     throw new Error('Explicit MIGRATION_DATABASE_URL required');
   provisionOidc(process.env.MIGRATION_DATABASE_URL, {
     secret: process.env.AUTH_SECRET,
+    browser: process.env.GRAPHQL_OIDC_CLIENT_ID
+      ? {
+          clientId: process.env.GRAPHQL_OIDC_CLIENT_ID,
+          callback: `${new URL(process.env.AUTH_ISSUER).origin}/graphql/auth/callback`,
+        }
+      : undefined,
     audience: process.env.API_AUDIENCE ?? 'urn:tour-itinerary:api',
     clientId: process.env.OIDC_CLIENT_ID,
     callback: process.env.OIDC_CALLBACK_URL,

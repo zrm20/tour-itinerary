@@ -64,7 +64,7 @@ The startup scripts load the optional, gitignored `backend/.env` using Node's na
 | `COMMIT_SHA`         | `local`       | Full 40-character lowercase Git SHA; `local` allowed only outside production |
 | `GRAPHQL_PLAYGROUND` | `false`       | Exactly `true` or `false`; enables the browser query editor at `/graphql`    |
 
-Set `GRAPHQL_PLAYGROUND=true` in `backend/.env` to enable the browser query editor, then restart the development server. It defaults to disabled in every environment and can be enabled explicitly in shared development through its environment configuration.
+Set `GRAPHQL_PLAYGROUND=true` in `backend/.env` to enable the browser query editor, then restart the development server. It defaults to disabled in every environment and can be enabled explicitly in shared development through its environment configuration. For integrated sign-in with real accounts, configure the separate browser client in the [GraphiQL authentication guide](docs/authentication.md#graphiql-sign-in).
 
 Empty or invalid settings fail at startup with the setting's name. `COMMIT_SHA` is required in production; the application does not invoke Git or contact a service to discover it. Configuration is typed and validated before listening. The runtime consumes the restricted `DATABASE_URL` (application/auth CRUD and fixture SELECT); startup and `/health` remain independent of the database. Local database tools use separate connections documented in [the persistence guide](docs/persistence.md).
 

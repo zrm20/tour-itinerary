@@ -13,11 +13,11 @@ import { UsersService } from './users/users.service';
 import { QueryResolver } from './graphql/query.resolver';
 import { MutationResolver } from './graphql/mutation.resolver';
 import { IdentityProviderController } from './identity-provider/identity-provider.controller';
-import { AppConfig } from './app-config';
 import { AppConfigModule } from './app-config.module';
 import { HealthController } from './health.controller';
 import { ToursModule } from './tours/tours.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { EditorController } from './graphiql/editor.controller';
 
 const safeError = (code: unknown) => {
   if (code === 'INFRASTRUCTURE_PROBE_FAILED')
@@ -47,10 +47,9 @@ const safeError = (code: unknown) => {
     GraphQLModule.forRootAsync<ApolloDriverConfig>({
       driver: ApolloDriver,
       imports: [AppConfigModule],
-      inject: [AppConfig],
-      useFactory: (config: AppConfig) => ({
+      useFactory: () => ({
         typePaths: [join(__dirname, '**/*.graphql')],
-        playground: config.graphqlPlayground,
+        playground: false,
         includeStacktraceInErrorResponses: false,
         formatError: (error) => {
           const { code, message } = safeError(error.extensions?.code);
@@ -64,7 +63,7 @@ const safeError = (code: unknown) => {
       }),
     }),
   ],
-  controllers: [HealthController, IdentityProviderController],
+  controllers: [HealthController, IdentityProviderController, EditorController],
   providers: [
     AuthConfig,
     UsersService,

@@ -111,3 +111,45 @@ run "prepare_rotated_versions" {
     error_message = "Version rotation must remain Terraform-managed rather than ignored with release fields."
   }
 }
+
+run "public_editor" {
+  command = plan
+  variables { graphql_playground = true }
+  assert {
+    condition = (
+      one(google_cloud_run_service.api[0].template[0].spec[0].containers[0].env).name == "GRAPHQL_PLAYGROUND" &&
+      one(google_cloud_run_service.api[0].template[0].spec[0].containers[0].env).value == "true"
+    )
+    error_message = "The public editor must not require authentication or database configuration."
+  }
+}
+
+run "editor_signin_requires_authentication" {
+  command = plan
+  variables {
+    graphql_playground     = true
+    graphql_oidc_client_id = "graphiql"
+  }
+  expect_failures = [var.graphql_oidc_client_id]
+}
+
+run "authenticated_editor" {
+  command = plan
+  variables {
+    enable_persistence                = true
+    runtime_database_secret_version   = "4"
+    migration_database_secret_version = "7"
+    enable_authentication             = true
+    auth_secret_version               = "1"
+    auth_issuer                       = "https://dev.example.test/auth"
+    graphql_playground                = true
+    graphql_oidc_client_id            = "graphiql"
+  }
+  assert {
+    condition = alltrue([
+      for name, value in { GRAPHQL_PLAYGROUND = "true", GRAPHQL_OIDC_CLIENT_ID = "graphiql" } :
+      one([for env in google_cloud_run_service.api[0].template[0].spec[0].containers[0].env : env.value if env.name == name]) == value
+    ])
+    error_message = "The editor must receive its explicit gate and provisioned public client ID."
+  }
+}

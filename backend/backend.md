@@ -18,7 +18,7 @@ The application owns a permanent user ID independent of the authentication provi
 
 Authentication persistence shares the existing PostgreSQL database, with dedicated tables owned exclusively by the authentication module. Other modules reference application user IDs and must not query credential or authentication-session tables directly.
 
-Clients use redirect-based OIDC sign-in through Authorization Code with PKCE. The authentication module owns the login continuation endpoint within the NestJS deployment; no authentication screens are rendered in the development flow, and password login is not exposed as a custom GraphQL operation.
+Clients use redirect-based OIDC sign-in through Authorization Code with PKCE. The authentication module owns a minimal, self-contained email/password login page within the NestJS deployment that resumes the provider's signed authorization continuation; there are no other authentication screens, and password login is not exposed as a custom GraphQL operation.
 
 The application API remains client agnostic and does not act as a browser-session backend or BFF. Cookie sessions and browser-specific token handling belong to a separate client-owned server framework or thin BFF if a web client chooses that architecture. Hosting the initial authentication server alongside the API does not give the application API responsibility for client-specific sessions.
 

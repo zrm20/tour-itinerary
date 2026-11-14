@@ -1,6 +1,6 @@
 # Development authentication
 
-The backend supports email/password registration, Authorization Code with S256 PKCE, and RP-initiated current-session sign-out through its isolated Better Auth provider. The API independently validates signatures, issuer, audience, expiry and access-token kind. `currentUser` resolves a permanent application user ID through the provider identity, never by matching email. Display name uses preferred name when present, otherwise first name. There are no authentication screens or unrestricted client-registration endpoints. Sign-out ends only the current provider session; already-issued JWTs may remain usable until expiry.
+The backend supports email/password registration, Authorization Code with S256 PKCE, and RP-initiated current-session sign-out through its isolated Better Auth provider. The API independently validates signatures, issuer, audience, expiry and access-token kind. `currentUser` resolves a permanent application user ID through the provider identity, never by matching email. Display name uses preferred name when present, otherwise first name. The provider serves a minimal email/password login page for browser-based OIDC clients; there are no registration, recovery or account screens, and no unrestricted client-registration endpoints. Sign-out ends only the current provider session; already-issued JWTs may remain usable until expiry.
 
 ## Local setup
 
@@ -83,6 +83,37 @@ Authenticated users can create named organizations, list and read organizations 
 
 Ownership mutations lock the organization's database row and recheck the caller's current ownership inside the transaction. A removal is rejected with `BAD_USER_INPUT` if it would remove the final owner, including concurrent attempts. Grants/removals take effect on the next organization request with the same valid bearer token. Removing ownership does not delete the user or change any separately assigned tour role.
 
+## Browser sign-in and Postman
+
+An unauthenticated browser authorization request redirects to the provider's login page at `/auth/login`. The page accepts only the provider's signed, unexpired continuation; a missing, altered or expired continuation shows a restart message without a form. Submitting the form sends the email, password and continuation to the provider's email sign-in, which resumes the original authorization request and redirects to the client's registered callback with a code and the original state. Incorrect credentials show a generic message and can be retried. The page sets a nonce-based Content Security Policy, forbids framing and caching, and never logs or displays credentials or tokens.
+
+Postman reuses the native public client provisioned by `npm run auth:setup`; it needs no extra registration. Postman's embedded authorization window captures the redirect to the registered loopback callback itself, so nothing needs to listen on that port. Do not enable **Authorize using browser**: its `https://oauth.pstmn.io/v1/callback` URL is not registered and will be rejected. The client skips consent, so the flow never reaches a consent page.
+
+Start the backend after completing [local setup](#local-setup) and registering an account with `npm run auth:register`. In a Postman request's **Authorization** tab, choose **OAuth 2.0** and configure a new token, substituting your `backend/.env` values (shown with the defaults):
+
+| Setting                                  | Value                                                      |
+| ---------------------------------------- | ---------------------------------------------------------- |
+| Grant type                               | Authorization Code (With PKCE)                             |
+| Callback URL                             | `OIDC_CALLBACK_URL`, e.g. `http://127.0.0.1:9876/callback` |
+| Auth URL                                 | `AUTH_ISSUER` + `/oauth2/authorize`                        |
+| Access Token URL                         | `AUTH_ISSUER` + `/oauth2/token`                            |
+| Client ID                                | `OIDC_CLIENT_ID`                                           |
+| Client Secret                            | Leave empty (public client)                                |
+| Code Challenge Method                    | SHA-256                                                    |
+| Code Verifier                            | Leave empty to generate one                                |
+| Scope                                    | `openid profile email`                                     |
+| State                                    | Any random value                                           |
+| Client Authentication                    | Send client credentials in body                            |
+| Advanced: Auth Request and Token Request | `resource` = `API_AUDIENCE`, e.g. `urn:tour-itinerary:api` |
+
+Send `resource` on both requests, as the CLI does, so the provider issues a JWT access token for the API audience. Use the exact host from `AUTH_ISSUER` in both URLs (for example, `127.0.0.1` and `localhost` are different origins). Select **Get New Access Token**, sign in on the login page, then select **Use Token**. Postman sends `Authorization: Bearer ACCESS_TOKEN`; set **Use Token Type** to **Access token** rather than ID token. Request a new token after the access-token lifetime expires.
+
+To use the token in GraphiQL, enable the query editor (`GRAPHQL_PLAYGROUND=true`, see the [README](../README.md)), open `/graphql`, and add the header in the **Headers** pane:
+
+```json
+{ "Authorization": "Bearer ACCESS_TOKEN" }
+```
+
 ## Shared development
 
 Use the existing [pause/drain/maintenance process](operations/google-cloud.md#pause-and-resume-releases) and [persistence activation](operations/neon.md). Authentication adds a separate opt-in Terraform gate, disabled by default. Apply reviewed secret-container preparation first. An engineer supplies at least 32 random characters directly to the individual `api-auth-secret` Secret Manager secret, recording only its numeric version. Terraform manages the container and runtime-only Secret Accessor grant, never its value; delivery has no direct access.
@@ -95,7 +126,7 @@ Keep secrets out of plans, state, workflow variables, logs and issues. Changing 
 
 ## Verification
 
-Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts test/update-own-names.spec.ts test/organizations.spec.ts`. Production image health checks remain independent of database and authentication secrets.
+Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts test/login-page.spec.ts test/update-own-names.spec.ts test/organizations.spec.ts test/tours.spec.ts`. Production image health checks remain independent of database and authentication secrets.
 
 ## Tours owned by organizations
 

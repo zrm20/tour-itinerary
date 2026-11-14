@@ -41,6 +41,16 @@ resource "google_cloud_run_service" "api" {
       containers {
         image = var.bootstrap_image
         dynamic "env" {
+          for_each = var.graphql_playground ? merge(
+            { GRAPHQL_PLAYGROUND = "true" },
+            var.graphql_oidc_client_id == null ? {} : { GRAPHQL_OIDC_CLIENT_ID = var.graphql_oidc_client_id }
+          ) : {}
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+        dynamic "env" {
           for_each = var.enable_persistence ? [1] : []
           content {
             name = "DATABASE_URL"

@@ -108,11 +108,19 @@ Start the backend after completing [local setup](#local-setup) and registering a
 
 Send `resource` on both requests, as the CLI does, so the provider issues a JWT access token for the API audience. Use the exact host from `AUTH_ISSUER` in both URLs (for example, `127.0.0.1` and `localhost` are different origins). Select **Get New Access Token**, sign in on the login page, then select **Use Token**. Postman sends `Authorization: Bearer ACCESS_TOKEN`; set **Use Token Type** to **Access token** rather than ID token. Request a new token after the access-token lifetime expires.
 
-To use the token in GraphiQL, enable the query editor (`GRAPHQL_PLAYGROUND=true`, see the [README](../README.md)), open `/graphql`, and add the header in the **Headers** pane:
+## GraphiQL sign-in
 
-```json
-{ "Authorization": "Bearer ACCESS_TOKEN" }
-```
+Set `GRAPHQL_PLAYGROUND=true` and `GRAPHQL_OIDC_CLIENT_ID=tour-itinerary-graphiql` in `backend/.env`, alongside the authentication settings above. Choose a client ID distinct from `OIDC_CLIENT_ID`. Run `npm run auth:setup` explicitly, then restart the backend. Setup adds a **public web client** with required S256 PKCE and end-session support while preserving the native CLI/Postman client and existing signing keys. No startup, editor request, health check or ordinary read provisions database state.
+
+The browser callback is exactly the origin of `AUTH_ISSUER` followed by `/graphql/auth/callback`, for example `http://127.0.0.1:3000/graphql/auth/callback`. The registered logout return destination is that origin followed by `/graphql`. HTTP is allowed only on loopback; shared development uses HTTPS. Open `/graphql` on the exact issuer origin (including host and port); `localhost`, `127.0.0.1`, tagged revision hosts and other aliases are different origins.
+
+Choose **Sign in**, enter an existing account's email and password on `/auth/login`, and return to GraphiQL. Run `currentUser` or another permitted operation: the fetcher automatically sends the API access token as a bearer header. The editor validates callback state and expiry, uses PKCE for code exchange, and validates the ID token's signature, issuer, audience, expiry and nonce before retaining it for logout. Access tokens are independently validated for the API audience and token kind; application permissions are unchanged.
+
+**Sign out / switch account** immediately clears the editor's access token and uses the existing RP-initiated logout endpoint to end that provider session. Successful logout permits sign-in as another account. Failed logout leaves the editor signed out, reports failure, and retains only the ID-token logout handle so the tester can retry. Other provider sessions remain active. Already-issued JWT access tokens retain their original expiry semantics. Logout uses a back-channel POST with the ID-token hint in the body; it does not navigate to the registered logout return URL.
+
+The editor keeps its access token, ID-token logout handle and pending PKCE/state/nonce in **tab-scoped `sessionStorage`**, separate from GraphiQL's query history. Reloading retains the editor session; closing the tab clears its storage but does not itself log out of the provider. Duplicating a tab may copy that tab's session, so use a new independent sign-in for independent-session testing. Query/variable history follows GraphiQL's existing browser storage behavior. The Headers pane and header persistence are disabled; tokens are attached only by the fetcher and never saved in GraphiQL headers/history, placed in URLs, or logged. Callback response parameters are removed from the address bar before external editor assets load. Browser session storage must be enabled; otherwise public queries remain available with a configuration message.
+
+Expired or rejected access tokens stop being attached, and the editor prompts the tester to sign out and sign in again. There is no automatic refresh. `FORBIDDEN` means the account lacks permission and does not expire the editor session. Failed, cancelled, unsolicited, replayed or expired authorization callbacks show a generic retry message without reflecting provider errors, credentials or tokens. Pending sign-ins expire after ten minutes. With authentication or the browser client unconfigured, the editor remains usable for public operations and hides sign-in. With `GRAPHQL_PLAYGROUND=false`, the editor and all editor-authentication routes are unavailable, preserving the existing GraphQL API and database-independent health/startup behavior.
 
 ## Shared development
 
@@ -122,11 +130,13 @@ With releases paused and drained, apply reviewed migrations through the existing
 
 Review Terraform inputs `enable_authentication = true`, `auth_secret_version`, `auth_issuer`, `api_audience` and `access_token_ttl_seconds`. Use the stable normal HTTPS service URL followed by `/auth` as issuer, including when requests reach a tagged candidate revision. Preserve the existing persistence gate and pinned database-secret versions. Apply, privately verify health/probe and authentication, then resume releases. Routine delivery retains its existing migration/seed checks and does not run Terraform or provision authentication.
 
+To enable editor sign-in in shared development, while releases are paused and drained, an engineer explicitly runs the same setup with `GRAPHQL_OIDC_CLIENT_ID` and the stable HTTPS `AUTH_ISSUER` as well as the existing native client and resource settings. This registers the exact HTTPS `/graphql/auth/callback` and `/graphql` logout return destination. Set the matching reviewed Terraform inputs `graphql_playground = true` and `graphql_oidc_client_id` to that public web client ID, plan/review/apply through the existing maintenance process, verify sign-in on the normal service origin, then resume releases. Omit the client ID for a public-query-only editor; leave `graphql_playground = false` to disable the editor and its authentication routes. No shared provisioning or deployment is performed by routine delivery.
+
 Keep secrets out of plans, state, workflow variables, logs and issues. Changing `AUTH_SECRET` affects encrypted keys and sessions: an engineer must plan compatible re-encryption/key provisioning and retained rollback revisions. Merely changing its secret version is not a signing-key migration.
 
 ## Verification
 
-Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts test/login-page.spec.ts test/update-own-names.spec.ts test/organizations.spec.ts test/tours.spec.ts`. Production image health checks remain independent of database and authentication secrets.
+Vitest HTTP tests use disposable PostgreSQL and real provider/token issuance. Follow [database verification](persistence.md#verification), including `TEST_ADMIN_DATABASE_URL`, then run `npm test -- test/authentication.spec.ts test/login-page.spec.ts test/graphiql.spec.ts test/update-own-names.spec.ts test/organizations.spec.ts test/tours.spec.ts`. Production image health checks remain independent of database and authentication secrets.
 
 ## Tours owned by organizations
 

@@ -110,3 +110,21 @@ variable "access_token_ttl_seconds" {
     error_message = "Token lifetime must be an integer from 1 to 86400."
   }
 }
+
+variable "graphql_playground" {
+  type        = bool
+  default     = false
+  description = "Opt in to the GraphiQL browser editor; independent of API availability."
+}
+
+variable "graphql_oidc_client_id" {
+  type        = string
+  default     = null
+  description = "Public web client explicitly provisioned for the stable issuer origin's /graphql/auth/callback."
+  validation {
+    condition = var.graphql_oidc_client_id == null ? true : (
+      var.graphql_playground && var.enable_authentication && length(trimspace(var.graphql_oidc_client_id)) > 0
+    )
+    error_message = "Editor sign-in requires an enabled editor, activated authentication and a nonblank public web client ID."
+  }
+}

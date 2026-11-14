@@ -13,6 +13,7 @@ beforeEach(() => {
   vi.stubEnv('DATABASE_URL', undefined);
   vi.stubEnv('AUTH_ISSUER', undefined);
   vi.stubEnv('GRAPHQL_PLAYGROUND', undefined);
+  vi.stubEnv('GRAPHQL_OIDC_CLIENT_ID', undefined);
 });
 
 afterEach(async () => {
@@ -112,3 +113,59 @@ it('starts and serves health with authentication configured and PostgreSQL unava
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ status: 'ok', commit: 'local' });
 });
+
+it.each([
+  [false, true, true],
+  [true, false, true],
+  [true, true, false],
+  [true, true, true],
+])(
+  'gates editor authentication without touching PostgreSQL (editor=%s, auth=%s, client=%s)',
+  async (editor, auth, client) => {
+    vi.stubEnv('GRAPHQL_PLAYGROUND', String(editor));
+    vi.stubEnv('GRAPHQL_OIDC_CLIENT_ID', client ? 'editor-client' : undefined);
+    if (auth) {
+      vi.stubEnv('AUTH_ISSUER', 'http://127.0.0.1:3000/auth');
+      vi.stubEnv(
+        'AUTH_SECRET',
+        'test-only-secret-at-least-thirty-two-characters',
+      );
+      vi.stubEnv(
+        'DATABASE_URL',
+        'postgresql://unavailable:unavailable@127.0.0.1:1/unavailable',
+      );
+    }
+    const origin = await startApp();
+    const configured = editor && auth && client;
+    const callback = await fetch(
+      `${origin}/graphql/auth/callback?error=access_denied&state=untrusted`,
+      { headers: { accept: 'text/html' } },
+    );
+    expect(callback.status).toBe(configured ? 200 : 404);
+    const body = await callback.text();
+    expect(body).not.toContain('untrusted');
+    if (!configured) {
+      for (const path of ['exchange', 'logout']) {
+        const response = await fetch(`${origin}/graphql/auth/${path}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin },
+          body: '{}',
+        });
+        expect(response.status).toBe(404);
+      }
+    }
+    if (editor && !configured) {
+      const page = await fetch(`${origin}/graphql`, {
+        headers: { accept: 'text/html' },
+      });
+      expect(await page.text()).toContain('const options = null');
+    }
+    const publicQuery = await fetch(`${origin}/graphql`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: '{ __typename }' }),
+    });
+    expect(await publicQuery.json()).toEqual({ data: { __typename: 'Query' } });
+    expect((await fetch(`${origin}/health`)).status).toBe(200);
+  },
+);

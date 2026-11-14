@@ -6,5 +6,6 @@ export function provisionOidc(
     callback: string;
     lifetime?: number;
     secret?: string;
+    browser?: { clientId: string; callback: string };
   },
 ): Promise<void>;

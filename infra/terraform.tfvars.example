@@ -19,3 +19,7 @@ enable_authentication = false
 # auth_issuer = "https://STABLE_SERVICE_HOST/auth"
 # api_audience = "urn:tour-itinerary:api"
 # access_token_ttl_seconds = 1800
+
+# Optional browser editor; sign-in requires explicit web-client provisioning.
+graphql_playground = false
+# graphql_oidc_client_id = "tour-itinerary-graphiql"

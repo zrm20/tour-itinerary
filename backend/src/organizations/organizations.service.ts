@@ -51,10 +51,9 @@ export class OrganizationsService {
     userId: string,
     grant: boolean,
   ) {
-    return this.persistence.database.$transaction(async (transaction) => {
-      // Serialize ownership changes for this organization. Authorization is
-      // checked after acquiring the lock so a removed owner cannot grant access.
-      await transaction.$queryRaw`SELECT id FROM organization WHERE id = ${organizationId} FOR UPDATE`;
+    return this.persistence.write(async (transaction) => {
+      // The shared mutation lock covers deletion and all ownership changes.
+      // Read current authority only after acquiring it.
       const actor = await transaction.organizationOwner.findUnique({
         where: { organizationId_userId: { organizationId, userId: actorId } },
       });
@@ -97,13 +96,12 @@ export class OrganizationsService {
 
   async create(userId: string, name: string) {
     const organizationName = requireName(name);
-    // Nested create persists the organization and initial ownership together.
-    return this.persistence.database.organization.create({
-      data: {
-        name: organizationName,
-        owners: { create: { userId } },
-      },
-      select: { id: true, name: true },
+    return this.persistence.write(async (tx) => {
+      await tx.applicationUser.findUniqueOrThrow({ where: { id: userId } });
+      return tx.organization.create({
+        data: { name: organizationName, owners: { create: { userId } } },
+        select: { id: true, name: true },
+      });
     });
   }
 
@@ -128,17 +126,27 @@ export class OrganizationsService {
 
   async renameOwned(userId: string, organizationId: string, name: string) {
     const organizationName = requireName(name);
-    const ownership =
-      await this.persistence.database.organizationOwner.findUnique({
-        where: {
-          organizationId_userId: { organizationId, userId },
-        },
+    return this.persistence.write(async (tx) => {
+      const ownership = await tx.organizationOwner.findUnique({
+        where: { organizationId_userId: { organizationId, userId } },
       });
-    if (!ownership) throw new OrganizationAccessDenied();
-    return this.persistence.database.organization.update({
-      where: { id: organizationId },
-      data: { name: organizationName },
-      select: { id: true, name: true },
+      if (!ownership) throw new OrganizationAccessDenied();
+      return tx.organization.update({
+        where: { id: organizationId },
+        data: { name: organizationName },
+        select: { id: true, name: true },
+      });
+    });
+  }
+
+  async delete(userId: string, organizationId: string) {
+    return this.persistence.write(async (tx) => {
+      const ownership = await tx.organizationOwner.findUnique({
+        where: { organizationId_userId: { organizationId, userId } },
+      });
+      if (!ownership) throw new OrganizationAccessDenied();
+      await tx.organization.delete({ where: { id: organizationId } });
+      return true;
     });
   }
 }

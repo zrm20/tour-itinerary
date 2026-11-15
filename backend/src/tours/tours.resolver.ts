@@ -35,6 +35,11 @@ class TourErrorFilter implements GqlExceptionFilter {
 export class ToursResolver {
   constructor(private readonly tours: ToursService) {}
 
+  @Mutation()
+  deleteTour(@CurrentUser() user: User, @Args('id') id: string) {
+    return this.tours.delete(user.id, id);
+  }
+
   @Query()
   myTours(@CurrentUser() user: User) {
     return this.tours.list(user.id);

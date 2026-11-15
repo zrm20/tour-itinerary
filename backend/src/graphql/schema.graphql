@@ -18,5 +18,6 @@ extend type Query {
 }
 
 type Mutation {
+  deleteOwnUser: Boolean!
   updateOwnNames(input: UpdateOwnNamesInput!): User!
 }

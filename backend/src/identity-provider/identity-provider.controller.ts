@@ -77,7 +77,9 @@ export class IdentityProviderController {
         this.persistence,
       );
       this.handler ??= toNodeHandler(this.provider);
-      await this.handler(request, response);
+      await this.persistence.withMutationLock(() =>
+        this.handler!(request, response),
+      );
     } catch {
       if (!response.headersSent)
         response.status(503).json({ error: 'Authentication is unavailable' });

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Database } from '../persistence/database';
+import { IdentityAccounts } from '../identity-provider/identity-accounts';
 
 export interface UserProfile {
   email: string;
@@ -14,6 +15,8 @@ export interface OwnNamesUpdate {
   preferredName?: string | null;
 }
 
+export class InvalidUserDeletion extends Error {}
+
 export class InvalidOwnNames extends Error {
   constructor(message = 'Name fields are invalid') {
     super(message);
@@ -23,28 +26,45 @@ export class InvalidOwnNames extends Error {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly persistence: Database) {}
+  constructor(
+    private readonly persistence: Database,
+    private readonly accounts: IdentityAccounts,
+  ) {}
 
   async provision(issuer: string, subject: string, profile: UserProfile) {
-    // A single nested upsert is atomic. Email is deliberately neither a lookup
-    // key nor unique in the application: only verified issuer + subject link users.
-    try {
-      return await this.persistence.database.providerIdentity.upsert({
+    return this.persistence.write(async (tx) => {
+      await this.accounts.requireProvisionable(tx, issuer, subject);
+      // Email is neither a lookup key nor unique in the application. The
+      // mutation lock also serializes concurrent first provisioning.
+      return tx.providerIdentity.upsert({
         where: { issuer_subject: { issuer, subject } },
         update: {},
         create: { issuer, subject, user: { create: profile } },
         include: { user: true },
       });
-    } catch (error) {
-      // Concurrent first provisioning can race on the unique identity index.
-      if (error instanceof Error && 'code' in error && error.code === 'P2002') {
-        return this.persistence.database.providerIdentity.findUniqueOrThrow({
-          where: { issuer_subject: { issuer, subject } },
-          include: { user: true },
-        });
+    });
+  }
+
+  async deleteOwn(userId: string) {
+    return this.persistence.write(async (tx) => {
+      const user = await tx.applicationUser.findUniqueOrThrow({
+        where: { id: userId },
+        include: { identities: true, ownerships: true },
+      });
+      for (const { organizationId } of user.ownerships) {
+        if (
+          (await tx.organizationOwner.count({ where: { organizationId } })) ===
+          1
+        ) {
+          throw new InvalidUserDeletion(
+            'An organization must retain at least one owner.',
+          );
+        }
       }
-      throw error;
-    }
+      await this.accounts.deleteLinked(tx, user.identities);
+      await tx.applicationUser.delete({ where: { id: userId } });
+      return true;
+    });
   }
 
   async resolve(issuer: string, subject: string) {
@@ -64,10 +84,12 @@ export class UsersService {
       input.preferredName == null
         ? null
         : requireName(input.preferredName, 'preferredName');
-    const user = await this.persistence.database.applicationUser.update({
-      where: { id: userId },
-      data: { firstName, lastName, preferredName },
-    });
+    const user = await this.persistence.write((tx) =>
+      tx.applicationUser.update({
+        where: { id: userId },
+        data: { firstName, lastName, preferredName },
+      }),
+    );
     return this.withDisplayName(user);
   }
 

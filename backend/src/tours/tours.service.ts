@@ -23,28 +23,35 @@ function accessible(userId: string, manage = false): Prisma.TourWhereInput {
 export class ToursService {
   constructor(private readonly persistence: Database) {}
 
+  async delete(userId: string, id: string) {
+    return this.asOwner(userId, id, async (tx) => {
+      await tx.tour.delete({ where: { id } });
+      return true;
+    });
+  }
+
   async create(userId: string, organizationId: string, name: string) {
     const tourName = name.trim();
     if (!tourName) throw new InvalidTourName();
-    const ownership =
-      await this.persistence.database.organizationOwner.findUnique({
+    return this.persistence.write(async (tx) => {
+      const ownership = await tx.organizationOwner.findUnique({
         where: { organizationId_userId: { organizationId, userId } },
       });
-    if (!ownership) throw new TourAccessDenied();
-    return this.persistence.database.tour.create({
-      data: { organizationId, name: tourName },
+      if (!ownership) throw new TourAccessDenied();
+      return tx.tour.create({ data: { organizationId, name: tourName } });
     });
   }
 
   async rename(userId: string, id: string, name: string) {
     const tourName = name.trim();
     if (!tourName) throw new InvalidTourName();
-    const result = await this.persistence.database.tour.updateMany({
-      where: { id, ...accessible(userId, true) },
-      data: { name: tourName },
+    return this.persistence.write(async (tx) => {
+      const tour = await tx.tour.findFirst({
+        where: { id, ...accessible(userId, true) },
+      });
+      if (!tour) throw new TourAccessDenied();
+      return tx.tour.update({ where: { id }, data: { name: tourName } });
     });
-    if (!result.count) throw new TourAccessDenied();
-    return this.read(userId, id);
   }
 
   async list(userId: string) {
@@ -78,12 +85,10 @@ export class ToursService {
     tourId: string,
     action: (tx: Prisma.TransactionClient, owner: boolean) => Promise<T>,
   ) {
-    return this.persistence.database.$transaction(async (tx) => {
+    return this.persistence.write(async (tx) => {
       const tour = await tx.tour.findUnique({ where: { id: tourId } });
       if (!tour) throw new TourAccessDenied();
-      // Serialize all access changes with ownership changes before reading
-      // current ownership or assigned roles.
-      await tx.$queryRaw`SELECT id FROM organization WHERE id = ${tour.organizationId} FOR UPDATE`;
+      // The shared mutation lock covers deletion, ownership and access changes.
       const owner = await tx.organizationOwner.findUnique({
         where: {
           organizationId_userId: {

@@ -47,6 +47,11 @@ class OrganizationErrorFilter implements GqlExceptionFilter {
 export class OrganizationsResolver {
   constructor(private readonly organizations: OrganizationsService) {}
 
+  @Mutation()
+  deleteOrganization(@CurrentUser() user: User, @Args('id') id: string) {
+    return this.organizations.delete(user.id, id);
+  }
+
   @Query()
   organizationOwners(
     @CurrentUser() user: User,

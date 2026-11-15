@@ -11,6 +11,7 @@ extend type Query {
 }
 
 extend type Mutation {
+  deleteTour(id: ID!): Boolean!
   grantTourMember(tourId: ID!, userId: ID!): TourAccess!
   removeTourMember(tourId: ID!, userId: ID!): Boolean!
   grantTourAdmin(tourId: ID!, userId: ID!): TourAccess!

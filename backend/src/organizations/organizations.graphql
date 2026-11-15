@@ -10,6 +10,7 @@ extend type Query {
 }
 
 extend type Mutation {
+  deleteOrganization(id: ID!): Boolean!
   grantOrganizationOwner(organizationId: ID!, userId: ID!): Boolean!
   removeOrganizationOwner(organizationId: ID!, userId: ID!): Boolean!
   createOrganization(name: String!): Organization!

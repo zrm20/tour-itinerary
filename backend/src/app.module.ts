@@ -13,6 +13,7 @@ import { UsersService } from './users/users.service';
 import { QueryResolver } from './graphql/query.resolver';
 import { MutationResolver } from './graphql/mutation.resolver';
 import { IdentityProviderController } from './identity-provider/identity-provider.controller';
+import { IdentityAccounts } from './identity-provider/identity-accounts';
 import { AppConfigModule } from './app-config.module';
 import { HealthController } from './health.controller';
 import { ToursModule } from './tours/tours.module';
@@ -66,6 +67,7 @@ const safeError = (code: unknown) => {
   controllers: [HealthController, IdentityProviderController, EditorController],
   providers: [
     AuthConfig,
+    IdentityAccounts,
     UsersService,
     ApiBearerProvider,
     QueryResolver,

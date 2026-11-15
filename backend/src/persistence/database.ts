@@ -11,6 +11,8 @@ const mutationLock = 34001;
 @Injectable()
 export class Database implements OnModuleDestroy {
   private readonly mutationScope = new AsyncLocalStorage<boolean>();
+  // pg replaces failed idle connections. Request-time connection/query failures
+  // still propagate to the caller rather than becoming unhandled pool errors.
   private readonly coordination = new pg.Pool({
     connectionString:
       process.env.DATABASE_URL ??
@@ -19,7 +21,7 @@ export class Database implements OnModuleDestroy {
     connectionTimeoutMillis: 5000,
     statement_timeout: 5000,
     query_timeout: 6000,
-  });
+  }).on('error', () => undefined);
   // Constructing Prisma is lazy: health/startup never connect or seed.
   readonly database = new PrismaClient({
     adapter: new PrismaPg({

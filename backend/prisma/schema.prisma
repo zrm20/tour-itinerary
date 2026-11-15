@@ -270,7 +270,7 @@ model ProviderIdentity {
   issuer String
   subject String
   userId String
-  user   ApplicationUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user   ApplicationUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([issuer, subject])
   @@index([userId])
@@ -289,8 +289,8 @@ model Organization {
 model OrganizationOwner {
   organizationId String
   userId         String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  user           ApplicationUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           ApplicationUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([organizationId, userId])
   @@index([userId])
@@ -301,7 +301,7 @@ model Tour {
   id String @id @default(uuid())
   name String
   organizationId String
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   access TourAccess[]
 
   @@index([organizationId])
@@ -317,8 +317,8 @@ model TourAccess {
   tourId String
   userId String
   role TourRole
-  tour Tour @relation(fields: [tourId], references: [id], onDelete: Restrict)
-  user ApplicationUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+  tour Tour @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  user ApplicationUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([tourId, userId])
   @@index([userId])

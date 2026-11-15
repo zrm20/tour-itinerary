@@ -81,7 +81,27 @@ ID tokens and provider session tokens are rejected as API access tokens. Health 
 
 Authenticated users can create named organizations, list and read organizations they own, and rename an owned organization through schema-first GraphQL. Creation atomically records the permanent application user as the first organization owner. Organization names are not unique. Ownership is a user-to-organization association keyed by application user ID, never email or provider session records. Unauthenticated callers and nonowners cannot read or rename unrelated organizations. Owners can list owners with `organizationOwners(organizationId: ID!)`, grant ownership with `grantOrganizationOwner(organizationId: ID!, userId: ID!)`, and relinquish or remove it with `removeOrganizationOwner(organizationId: ID!, userId: ID!)`. Mutations return `true` on success; repeated grants and removing an absent association are idempotent. Targets for grants must already be registered application user IDs; email addresses and invitations are not supported. Owner lists expose permanent IDs and profile display names. Every owner has equal authority, including over ownership. Nonowners cannot inspect owner lists or manage ownership.
 
-Ownership mutations lock the organization's database row and recheck the caller's current ownership inside the transaction. A removal is rejected with `BAD_USER_INPUT` if it would remove the final owner, including concurrent attempts. Grants/removals take effect on the next organization request with the same valid bearer token. Removing ownership does not delete the user or change any separately assigned tour role.
+Ownership mutations use the shared database mutation lock and recheck the caller's current ownership inside the transaction. A removal is rejected with `BAD_USER_INPUT` if it would remove the final owner, including concurrent attempts. Grants/removals take effect on the next organization request with the same valid bearer token. Removing ownership does not delete the user or change any separately assigned tour role.
+
+## Permanent deletion
+
+The existing bearer token authorizes three explicit GraphQL mutations; no password or fresh sign-in is required:
+
+```graphql
+mutation { deleteTour(id: "TOUR_ID") }
+mutation { deleteOrganization(id: "ORGANIZATION_ID") }
+mutation { deleteOwnUser }
+```
+
+Each returns `true` after successful cleanup. Only a current owner of the organization can delete it or one of its tours. Assigned tour admins and members cannot delete either entity. Missing and inaccessible targets both return `FORBIDDEN`. Deleting a tour removes its assignments and preserves its organization, sibling tours and users. Deleting an organization removes all its ownerships, tours and tour assignments, even when it has only one owner. Users and unrelated organizations and tours survive.
+
+`deleteOwnUser` targets only the authenticated user. It returns `BAD_USER_INPUT` while that user solely owns any existing organization; add another owner or explicitly delete each solely owned organization first. Successful self-deletion preserves shared organizations and tours, removes all the user's ownerships, tour assignments, profile and provider mappings, and deletes every linked locally managed authentication identity, credential, session, consent, stored token and outstanding authorization code. Shared clients, resources and signing keys survive. External provider account deletion is not implemented.
+
+The deleted user's existing JWT access tokens fail on their next protected request even before expiry. Their previous password and session cookies cannot sign them in. Registering again with the same email creates a new permanent application user ID with no inherited access; old tokens remain invalid.
+
+Each deletion uses one database transaction for application and local authentication cleanup. Failure rolls back all required cleanup. A transaction-scoped PostgreSQL advisory lock coordinates application writes with complete user/session provider requests across instances. Current authority and last-owner checks run after acquiring the lock, and local provisioning verifies that the provider user still exists. This prevents concurrent owner departures, access grants, creation, deletion or sign-in from orphaning an organization or resurrecting a deleted identity. The current implementation serializes these writes across the database; reads remain concurrent. This favors consistency for the early development workload and limits write throughput.
+
+Deletion is permanent. There is no archive, restore, or backup-erasure guarantee. Operational backup/recovery policy is unchanged.
 
 ## Browser sign-in and Postman
 

@@ -77,7 +77,13 @@ export class IdentityProviderController {
         this.persistence,
       );
       this.handler ??= toNodeHandler(this.provider);
-      await this.handler(request, response);
+      const handle = () => this.handler!(request, response);
+      // Logout verifies ID-token hints by fetching our public JWKS over HTTP.
+      // Key discovery must remain available while that provider request holds
+      // the mutation lock; it does not change user/session state.
+      if (request.method === 'GET' && request.path === '/auth/jwks')
+        await handle();
+      else await this.persistence.withMutationLock(handle);
     } catch {
       if (!response.headersSent)
         response.status(503).json({ error: 'Authentication is unavailable' });

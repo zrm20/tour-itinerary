@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for tracker operations outside the automated Codex issue workflow. In that workflow, use its configured GitHub MCP server; use `gh` only for native dependencies or complete linked-PR data unavailable through MCP.
 
 ## Project planning and triage
 

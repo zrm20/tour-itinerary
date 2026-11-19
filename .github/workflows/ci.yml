@@ -96,3 +96,13 @@ jobs:
         working-directory: infra
       - run: terraform test
         working-directory: infra
+
+  automation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.2
+      - run: node --test scripts/agents/gate.test.mjs
